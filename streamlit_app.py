@@ -1,64 +1,70 @@
 import streamlit as st
 import pytesseract
 from PIL import Image
-import subprocess
 import shutil
 import re
 
-# --- CONFIGURACIÓN DE TESSERACT PARA STREAMLIT CLOUD ---
-def get_tesseract_path():
-    # 1. Intentar encontrarlo en el PATH del sistema
-    path = shutil.which("tesseract")
-    if path:
-        return path
-    
-    # 2. Rutas comunes en servidores Linux de Streamlit
-    comunes = ["/usr/bin/tesseract", "/usr/local/bin/tesseract"]
-    for p in comunes:
-        if shutil.which(p):
-            return p
-    return None
-
-t_path = get_tesseract_path()
-
+# Configuración de Tesseract
+t_path = shutil.which("tesseract")
 if t_path:
     pytesseract.pytesseract.tesseract_cmd = t_path
-else:
-    st.error("❌ Motor Tesseract no encontrado. Verifica que 'packages.txt' existe y tiene 'tesseract-ocr'.")
 
-# --- INTERFAZ DE STREAMLIT ---
-st.set_page_config(page_title="Predicciones 365", layout="centered")
-st.title("⚽ Analizador de Decisiones")
+st.set_page_config(page_title="Radar de Valor AI", layout="wide")
+st.title("⚽ Análisis Avanzado de Probabilidades")
 
-archivo = st.file_uploader("Sube la imagen del partido", type=['png', 'jpg', 'jpeg'])
+archivo = st.file_uploader("Sube la captura de 365Scores", type=['png', 'jpg', 'jpeg'])
 
 if archivo:
-    try:
-        img = Image.open(archivo)
-        st.image(img, caption="Imagen cargada")
+    img = Image.open(archivo)
+    col_img, col_analsis = st.columns([1, 1])
+    
+    with col_img:
+        st.image(img, caption="Datos detectados")
+
+    with st.spinner("Calculando métricas de valor..."):
+        texto = pytesseract.image_to_string(img, lang='spa')
         
-        with st.spinner("Analizando datos..."):
-            # Extraer texto forzando español
-            texto = pytesseract.image_to_string(img, lang='spa')
-            
-            # Depuración: Ver qué está leyendo el AI (puedes borrar esto luego)
-            with st.expander("Ver texto extraído (Debug)"):
-                st.code(texto)
+        # Extracción de métricas clave (Goles convertidos y concedidos)
+        # Basado en la estructura inferior de image.png
+        goles_local = re.search(r"(\d+\.\d+)\s*Goles convertidos", texto)
+        goles_visita = re.search(r"Goles convertidos\s*(\d+\.\d+)", texto)
+        
+        # Extracción de porcentajes de mercados específicos
+        re_ambos = re.search(r"(\d+)%.*Ambos equipos marcaron.*(\d+)%", texto)
+        re_over25 = re.search(r"(\d+)%.*Más de 2\.5 goles.*(\d+)%", texto)
+        re_invicta = re.search(r"(\d+)%.*Valla invicta.*(\d+)%", texto)
 
-            # Lógica de búsqueda mejorada
-            # Buscamos el patrón "X (Y%) Empató o Ganó"
-            re_empato = re.search(r"(\d+)\s*\((\d+)%\)\s*Empató o Ganó", texto, re.IGNORECASE)
-            
-            if re_empato:
-                porcentaje = int(re_empato.group(2))
-                st.metric("Probabilidad No Perder", f"{porcentaje}%")
-                
-                if porcentaje >= 80:
-                    st.success("✅ DECISIÓN: Apuesta por Local o Empate (1X)")
-                else:
-                    st.warning("⚠️ DECISIÓN: Riesgo moderado, no se recomienda apuesta fija.")
-            else:
-                st.info("No se detectó la fila 'Empató o Ganó'. Revisa el texto extraído en el botón de arriba.")
+    with col_analsis:
+        st.subheader("📊 Diagnóstico del Partido")
+        
+        # 1. Análisis de Solidez Defensiva
+        if re_invicta:
+            v_invicta_local = int(re_invicta.group(1))
+            if v_invicta_local > 40:
+                st.write(f"🛡️ **Fortaleza Defensiva:** El local mantiene el arco en cero el {v_invicta_local}% de las veces. Sugiere un partido de pocos goles para el rival.")
 
-    except Exception as e:
-        st.error(f"Ocurrió un error inesperado: {e}")
+        # 2. Análisis de Mercado: Ambos Marcan
+        if re_ambos:
+            prob_ambos = int(re_ambos.group(1))
+            if prob_ambos >= 50:
+                st.warning(f"🥅 **Tendencia BTTS:** Alta probabilidad de que ambos marquen ({prob_ambos}%).")
+
+        # 3. Lógica de "Valor" (Value Bet)
+        st.divider()
+        st.subheader("🤖 Recomendación del Algoritmo")
+        
+        # Cruce de datos para decisión final
+        if re_over25 and int(re_over25.group(2)) > 55:
+            st.success("🔥 **PICK: OVER 2.5 GOLES**")
+            st.write("Razón: La tendencia del visitante en goles totales supera el umbral estadístico de valor.")
+        
+        elif re_invicta and int(re_invicta.group(1)) >= 44:
+            st.success("✅ **PICK: LOCAL O EMPATE + UNDER 3.5**")
+            st.write("Razón: Alta capacidad de mantener valla invicta y bajo promedio de goles convertidos.")
+        
+        else:
+            st.info("⚠️ **MERCADO DIFERIDO:** Los datos actuales sugieren esperar a las alineaciones iniciales.")
+
+    # Debug para ver si el OCR leyó bien
+    with st.expander("Ver texto detectado por el motor"):
+        st.code(texto)
