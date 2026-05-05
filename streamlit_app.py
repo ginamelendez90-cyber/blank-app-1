@@ -4,64 +4,70 @@ from PIL import Image
 import re
 
 # Configuración de la página
-st.set_page_config(page_title="Analizador de Apuestas AI", page_icon="⚽")
+st.set_page_config(page_title="Analizador de Apuestas", page_icon="⚽")
 
-st.title("⚽ Decision Maker: Análisis de Estadísticas")
-st.write("Sube una captura de pantalla de las estadísticas para obtener una recomendación.")
+st.title("⚽ Decision Maker: Análisis de 365Scores")
+st.write("Sube la captura de pantalla para procesar los datos.")
 
-# 1. Cargador de archivos
-archivo_subido = st.file_uploader("Elige una imagen...", type=["png", "jpg", "jpeg"])
+# 1. Subida de archivo
+archivo_subido = st.file_uploader("Subir imagen (ej. image.png)", type=["png", "jpg", "jpeg"])
 
 if archivo_subido is not None:
-    # Mostrar la imagen subida
     imagen = Image.open(archivo_subido)
-    st.image(imagen, caption='Captura analizada', use_container_width=True)
+    st.image(imagen, caption='Imagen detectada', use_container_width=True)
     
-    with st.spinner('Extrayendo datos de la imagen...'):
-        # 2. OCR - Extraer texto
-        # Tip: Usar psm 6 ayuda a Tesseract a leer bloques de texto uniformes
+    with st.spinner('Procesando imagen con OCR...'):
+        # Extraer texto con configuración para bloques
         texto = pytesseract.image_to_string(imagen, lang='spa', config='--psm 6')
         
-        # 3. Lógica de extracción de datos (Basada en image.png)
-        def extraer_valor(patron, texto_fuente):
-            match = re.search(patron, texto_fuente, re.IGNORECASE)
-            if match:
-                return match.groups()
-            return None
-
-        # Buscamos los porcentajes y valores de las filas clave
-        datos = {
-            "Empató o Ganó": extraer_valor(r"(\d+)\s*\((\d+)%\)\s*Empató o Ganó\s*(\d+)\s*\((\d+)%\)", texto),
-            "Más de 2.5": extraer_valor(r"(\d+)\s*\((\d+)%\)\s*Más de 2\.5 goles\s*(\d+)\s*\((\d+)%\)", texto),
-            "Valla Invicta": extraer_valor(r"(\d+)\s*\((\d+)%\)\s*Valla invicta\s*(\d+)\s*\((\d+)%\)", texto)
+        # Diccionario para almacenar los datos extraídos
+        datos = {}
+        
+        # Patrones de búsqueda (basados en la estructura de tu imagen)
+        patrones = {
+            "Empato_Gano": r"(\d+)\s*\((\d+)%\)\s*Empató o Ganó",
+            "Mas_25": r"Más de 2\.5 goles\s*(\d+)\s*\((\d+)%\)",
+            "Valla_Invicta": r"(\d+)\s*\((\d+)%\)\s*Valla invicta"
         }
 
-    # 4. Mostrar Resultados y Decisión
-    st.subheader("📊 Análisis de Probabilidades")
-    
+        for clave, regex in patrones.items():
+            match = re.search(regex, texto, re.IGNORECASE)
+            if match:
+                datos[clave] = match.groups()
+
+    # 2. Mostrar Estadísticas Detectadas
+    st.subheader("📊 Datos Extraídos")
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        st.info("**Equipo Local (Izq)**")
-        if datos["Empató o Ganó"]:
-            st.metric("Prob. No Perder", f"{datos['Empató o Ganó'][1]}%")
-        if datos["Valla Invicta"]:
-            st.write(f"Valla invicta: {datos['Valla Invicta'][1]}%")
+        if "Empato_Gano" in datos:
+            valor = datos["Empato_Gano"][1]
+            st.metric("Prob. Imbatibilidad (Local)", f"{valor}%")
+        else:
+            st.warning("No se detectó 'Empató o Ganó'")
 
     with col2:
-        st.info("**Equipo Visitante (Der)**")
-        if datos["Más de 2.5"]:
-            st.metric("Tendencia Over 2.5", f"{datos['Más de 2.5'][3]}%")
+        if "Mas_25" in datos:
+            valor = datos["Mas_25"][1]
+            st.metric("Prob. Over 2.5 (Visita)", f"{valor}%")
+        else:
+            st.warning("No se detectó '+2.5 Goles'")
 
-    # 5. Lógica de Decisión Final
+    # 3. Lógica de Decisión Corregida
     st.divider()
-    st.header("🤖 Decisión del Script")
+    st.header("🤖 Recomendación")
 
-    if datos["Empató o Ganó"] and int(datos["Empató o Ganó'][1]) >= 80:
-        st.success("✅ **APUESTA RECOMENDADA:** Doble Oportunidad: Local o Empate (1X)")
-        st.write("Razón: El equipo local tiene una racha de imbatibilidad muy alta (89%).")
-    elif datos["Más de 2.5"] and int(datos["Más de 2.5"][3]) >= 55:
-        st.warning("🔥 **APUESTA RECOMENDADA:** Más de 2.5 Goles")
-        st.write("Razón: El equipo visitante tiende a participar en partidos con muchos goles.")
+    # Validamos existencia antes de operar
+    if "Empato_Gano" in datos:
+        porcentaje_local = int(datos["Empato_Gano"][1])
+        
+        if porcentaje_local >= 85:
+            st.success("✅ **ALTA CONFIANZA:** Apuesta a 'Doble Oportunidad (1X)'.")
+            st.write(f"Razón: El local tiene un {porcentaje_local}% de imbatibilidad.")
+        elif "Mas_25" in datos and int(datos["Mas_25"][1]) >= 55:
+            st.warning("🔥 **MODERADA:** Apuesta a 'Más de 2.5 Goles'.")
+            st.write("Razón: Tendencia alta de goles en el equipo visitante.")
+        else:
+            st.info("ℹ️ Datos insuficientes para una apuesta clara. Se recomienda prudencia.")
     else:
-        st.write("⚠️ Los datos no son lo suficientemente concluyentes para una apuesta de alta confianza.")
+        st.error("Error: No se pudieron extraer datos clave de la imagen.")
