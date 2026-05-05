@@ -11,11 +11,13 @@ if t_path:
 
 st.set_page_config(page_title="Radar de Valor Pro", layout="wide")
 
-# --- GESTIÓN DEL ESTADO DEL TEXTO ---
-if 'input_datos' not in st.session_state:
-    st.session_state['input_datos'] = ""
+# --- LÓGICA DE BORRADO FÍSICO ---
+# Usamos un contador para cambiar la 'key' del widget y forzar el borrado
+if 'contador_borrado' not in st.session_state:
+    st.session_state.contador_borrado = 0
 
-def limpiar_consola():
+def ejecutar_borrado():
+    st.session_state.contador_borrado += 1
     st.session_state['input_datos'] = ""
 
 def extraer_todo(texto):
@@ -36,32 +38,27 @@ def extraer_todo(texto):
 
 st.title("⚽ Consola de Análisis: Pegar y Borrar")
 
-# --- APARTADO DE TEXTO CON BOTÓN DE BORRADO ---
 st.subheader("📋 Datos del Partido")
 
-col_input, col_ctrl = st.columns([5, 1])
+# Cuadro de texto con 'key' dinámica basada en el contador
+# Cada vez que pulsas borrar, el ID cambia y el cuadro queda vacío
+texto_input = st.text_area(
+    "Pega aquí el texto de 365Scores:",
+    height=200,
+    placeholder="Pega los datos aquí...",
+    key=f"campo_texto_{st.session_state.contador_borrado}"
+)
 
-with col_ctrl:
-    st.write("###") # Espaciador
-    if st.button("🗑️ Borrar", use_container_width=True):
-        limpiar_consola()
-        st.rerun()
-
-with col_input:
-    texto_input = st.text_area(
-        "Pega aquí el texto de 365Scores:",
-        value=st.session_state['input_datos'],
-        height=200,
-        placeholder="Ej: Todas las competiciones... Últimos 9 partidos...",
-        key="campo_texto"
-    )
-    st.session_state['input_datos'] = texto_input
+# Botón de Borrar
+if st.button("🗑️ Borrar", use_container_width=True):
+    ejecutar_borrado()
+    st.rerun()
 
 # --- PROCESAMIENTO ---
 if texto_input:
     d = extraer_todo(texto_input)
     
-    # Fila 1: Métricas de Mercado
+    # Fila 1: Probabilidades
     st.divider()
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -69,23 +66,22 @@ if texto_input:
     with c2:
         if d["btts"]: st.metric("Ambos Marcan", f"{d['btts'][1]}%")
     with c3:
-        if d["over25"]: st.metric("Over 2.5 Goles", f"{d['over25'][1]}%")
+        if d["over25"]: st.metric("Over 2.5", f"{d['over25'][1]}%")
     with c4:
-        if d["invicta"]: st.metric("Valla Invicta L", f"{d['invicta'][1]}%")
+        if d["invicta"]: st.metric("Arco en 0 L", f"{d['invicta'][1]}%")
 
-    # Fila 2: Letalidad y Volumen
+    # Fila 2: Análisis de Letalidad
     st.divider()
     st.subheader("🎯 Eficiencia del Visitante")
     f2_c1, f2_c2, f2_c3 = st.columns(3)
 
     if d["goles_c"] and d["remates_arco"]:
-        # Calculamos letalidad según tus datos (1.91 goles / 5.91 remates al arco)
         letalidad = round(float(d["remates_arco"][1]) / float(d["goles_c"][1]), 2)
         f2_c1.metric("Letalidad", f"{letalidad} tiros/gol")
-        f2_c2.metric("Goles Promedio", d["goles_c"][1])
-        f2_c3.metric("Remates al Arco", d["remates_arco"][1])
+        f2_c2.metric("Prom. Goles", d["goles_c"][1])
+        f2_c3.metric("Tiros Puerta", d["remates_arco"][1])
 
-    # Fila 3: Otros Mercados
+    # Fila 3: Mercados Secundarios
     st.divider()
     f3_c1, f3_c2 = st.columns(2)
     with f3_c1:
@@ -102,8 +98,6 @@ if texto_input:
     # Recomendación Final
     st.divider()
     if d["ganar_empate"] and int(d["ganar_empate"][1]) >= 85:
-        st.success(f"🏆 **PICK SUGERIDO:** Doble Oportunidad Local (1X)")
+        st.success("🏆 PICK: Doble Oportunidad Local (1X)")
     elif d["over25"] and int(d["over25"][1]) >= 55:
-        st.warning("🔥 **PICK SUGERIDO:** Over 2.5 Goles")
-    else:
-        st.info("⚖️ **ESTADO:** Analizar mercado de Corners o esperar al Live.")
+        st.warning("🔥 PICK: Over 2.5 Goles")
