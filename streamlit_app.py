@@ -1,80 +1,81 @@
+import streamlit as st
 import pandas as pd
 from supabase import create_client
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 
-# --- CONFIGURACIÓN ---
-URL_SUPABASE = "https://netrbgledrnsjjuyhpui.supabase.co"
-KEY_SUPABASE = "sb_publishable_qH4a5QFumA-zqXfhZD6l-w_r5gTLRie"
-supabase = create_client(URL_SUPABASE, KEY_SUPABASE)
+# --- CONEXIÓN ---
+URL = st.secrets["https://netrbgledrnsjjuyhpui.supabase.co"]
+KEY = st.secrets["sb_publishable_qH4a5QFumA-zqXfhZD6l-w_r5gTLRie"]
+supabase = create_client(URL, KEY)
 
-def obtener_contexto_ia(texto_noticias):
-    """
-    SIMULACIÓN OPCIÓN 2: 
-    Aquí conectarías con la API de Gemini para analizar noticias.
-    Retorna un valor entre -1.0 (muy negativo) y 1.0 (muy positivo).
-    """
-    # Lógica simplificada: busca palabras clave para el ejemplo
-    palabras_positivas = ['ganador', 'estable', 'crecimiento', 'favorable']
-    if any(word in texto_noticias.lower() for word in palabras_positivas):
-        return 0.85
-    return -0.42
+st.title("⚽ Radar de Valor Inteligente")
 
-def entrenar_y_predecir(datos_historicos, nuevos_datos, contexto_ia):
-    """
-    OPCIÓN 3: Machine Learning.
-    Entrena un modelo rápido con lo que hay en Supabase y predice.
-    """
-    df = pd.DataFrame(datos_historicos)
+# --- FORMULARIO DE ENTRADA ---
+with st.form("prediccion_form"):
+    col1, col2 = st.columns(2)
+    with col1:
+        local = st.text_input("Equipo Local")
+        xg_l = st.number_input("xG Promedio Local", value=1.5)
+    with col2:
+        visitante = st.text_input("Equipo Visitante")
+        xg_v = st.number_input("xG Promedio Visitante", value=1.2)
     
-    # Definimos variables X (técnicas + contexto) y Y (resultado real pasado)
-    X = df[['dato_tecnico_1', 'dato_tecnico_2', 'puntaje_contexto_ia']]
-    y = df['resultado_numerico'] # Ej: 1 para éxito, 0 para fallo
+    noticias = st.text_area("Contexto (Noticias, bajas, clima)", 
+                           placeholder="Ej: El goleador local está lesionado. Clima lluvioso.")
     
-    modelo = RandomForestRegressor(n_estimators=100)
-    modelo.fit(X, y)
+    boton = st.form_submit_button("Analizar Partido")
+
+if boton:
+    # --- PASO 1: ANÁLISIS DE IA (OPCIÓN 2) ---
+    # Simulamos el análisis de sentimiento de la noticia
+    # Un valor > 0 favorece al local, < 0 favorece al visitante
+    puntos_ia = 0.0
+    if "lesionado" in noticias.lower() or "baja" in noticias.lower():
+        puntos_ia -= 0.3
+    if "motivación" in noticias.lower() or "favorito" in noticias.lower():
+        puntos_ia += 0.2
     
-    # Predecir con los datos de hoy + el sentimiento de la IA
-    nuevos_datos['puntaje_contexto_ia'] = contexto_ia
-    prediccion = modelo.predict([list(nuevos_datos.values())])
-    
-    return float(prediccion[0])
+    # --- PASO 2: MACHINE LEARNING (OPCIÓN 3) ---
+    # Traemos históricos para entrenar el modelo
+    res = supabase.table("predicciones_futbol").select("*").execute()
+    historicos = res.data
 
-# --- FLUJO PRINCIPAL ---
+    if len(historicos) > 10:
+        df = pd.DataFrame(historicos)
+        # Entrenamos con xG y el sentimiento que hubo en ese momento
+        X = df[['xg_local', 'xg_visitante', 'sentimiento_noticias']]
+        # Convertimos resultado a números (1: Local, 0: Empate/Visita)
+        y = df['resultado_final'].apply(lambda x: 1 if x == 'Local' else 0)
+        
+        modelo = RandomForestClassifier()
+        modelo.fit(X, y)
+        
+        # Predicción actual
+        entrada = np.array([[xg_l, xg_v, puntos_ia]])
+        probabilidad = modelo.predict_proba(entrada)[0][1]
+    else:
+        # Lógica estadística base si no hay suficiente historial
+        st.warning("Pocos datos históricos. Usando cálculo estadístico base.")
+        probabilidad = (xg_l / (xg_l + xg_v)) + puntos_ia
 
-# 1. Obtener históricos de Supabase para entrenar
-res = supabase.table("predicciones_inteligentes").select("*").execute()
-historicos = res.data
+    # --- PASO 3: GUARDAR Y MOSTRAR ---
+    registro = {
+        "equipo_local": local,
+        "equipo_visitante": visitante,
+        "xg_local": float(xg_l),
+        "xg_visitante": float(xg_v),
+        "sentimiento_noticias": float(puntos_ia),
+        "probabilidad_victoria": float(probabilidad)
+    }
 
-# 2. Datos del evento actual (Ejemplo)
-noticia_hoy = "El mercado muestra un crecimiento favorable para esta semana"
-datos_hoy = {
-    "dato_tecnico_1": 1.5,
-    "dato_tecnico_2": 2.8
-}
-
-# 3. Ejecutar Inteligencia
-print("Analizando contexto con IA...")
-puntuacion = obtener_contexto_ia(noticia_hoy)
-
-print("Calculando predicción con ML...")
-# Si no hay históricos, usamos una base por defecto
-if len(historicos) > 5:
-    resultado = entrenar_y_predecir(historicos, datos_hoy, puntuacion)
-else:
-    # Lógica inicial si la base está vacía
-    resultado = (datos_hoy['dato_tecnico_1'] + datos_hoy['dato_tecnico_2']) * 0.1 + puntuacion
-
-# 4. Guardar en Supabase para aprender después
-registro = {
-    "nombre_evento": "Evento Beta 01",
-    "dato_tecnico_1": datos_hoy['dato_tecnico_1'],
-    "dato_tecnico_2": datos_hoy['dato_tecnico_2'],
-    "puntaje_contexto_ia": puntuacion,
-    "prediccion_final_ml": resultado
-}
-
-supabase.table("predicciones_inteligentes").insert(registro).execute()
-
-print(f"--- PROCESO COMPLETADO ---")
-print(f"Confianza de la predicción: {resultado:.2f}")
+    try:
+        supabase.table("predicciones_futbol").insert(registro).execute()
+        st.success(f"Análisis completado para {local} vs {visitante}")
+        
+        # Mostrar resultado con métricas
+        st.metric("Probabilidad Victoria Local", f"{probabilidad*100:.1f}%")
+        st.progress(probabilidad)
+        
+    except Exception as e:
+        st.error(f"Error al guardar: {e}")
