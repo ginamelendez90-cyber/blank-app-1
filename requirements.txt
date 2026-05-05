@@ -1,4 +1,5 @@
-supabase
 pandas
-scikit-learn
 numpy
+scipy
+streamlit
+matplotlib
