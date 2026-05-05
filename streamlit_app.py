@@ -4,21 +4,21 @@ from PIL import Image
 import shutil
 import re
 
-# --- CONFIGURACIÓN DE MOTOR OCR ---
+# --- MOTOR OCR ---
 t_path = shutil.which("tesseract")
 if t_path:
     pytesseract.pytesseract.tesseract_cmd = t_path
 
-st.set_page_config(page_title="Radar de Valor Pro: Odds Edition", layout="wide")
+st.set_page_config(page_title="Radar Pro: Value Betting", layout="wide")
 
-# --- LÓGICA DE BORRADO FÍSICO ---
-if 'contador_borrado' not in st.session_state:
-    st.session_state.contador_borrado = 0
+# --- LÓGICA DE ESTADO ---
+if 'contador' not in st.session_state:
+    st.session_state.contador = 0
 
-def ejecutar_borrado():
-    st.session_state.contador_borrado += 1
+def borrar_todo():
+    st.session_state.contador += 1
 
-def extraer_todo(texto):
+def extraer_datos(texto):
     def buscar(patron):
         m = re.search(patron, texto, re.IGNORECASE)
         return m.groups() if m else None
@@ -29,77 +29,85 @@ def extraer_todo(texto):
         "over25": buscar(r"(\d+)\s*\((\d+)%\)\s*Más de 2\.5 goles"),
         "goles_c": buscar(r"(\d+\.\d+)\s*Goles convertidos\s*(\d+\.\d+)"),
         "remates_arco": buscar(r"(\d+\.\d+)\s*Remates al arco\s*(\d+\.\d+)"),
-        "corners": buscar(r"(\d+\.\d+)\s*Corners\s*(\d+\.\d+)"),
     }
 
+def identificar_cuotas(texto):
+    # Busca números decimales (cuotas)
+    nums = re.findall(r"\d+\.\d+", texto)
+    # Intenta mapear por orden común: Local (0), Empate (1), Visita (2) o Over/Under
+    cuotas = {}
+    if len(nums) >= 3:
+        cuotas['1X2'] = [float(nums[0]), float(nums[1]), float(nums[2])]
+    if len(nums) >= 2:
+        cuotas['O/U'] = [float(n) for n in nums[-2:]]
+    return cuotas
+
 # --- INTERFAZ ---
-st.title("⚽ Consola de Análisis + Comparador de Cuotas")
+st.title("⚽ Radar de Valor: Análisis de Cuotas")
 
-# --- APARTADO DE ENTRADA DE DATOS ---
-col_stats, col_odds = st.columns(2)
+col_left, col_right = st.columns(2)
 
-with col_stats:
+with col_left:
     st.subheader("📋 Estadísticas (365Scores)")
-    texto_stats = st.text_area(
-        "Pega los datos del partido aquí:",
-        height=150,
-        key=f"stats_{st.session_state.contador_borrado}"
-    )
+    txt_stats = st.text_area("Pega datos aquí:", height=150, key=f"s_{st.session_state.contador}")
 
-with col_odds:
-    st.subheader("💰 Cuotas (Bookie)")
-    texto_cuotas = st.text_area(
-        "Pega las cuotas (ej: 1.85, 3.40):",
-        height=150,
-        key=f"odds_{st.session_state.contador_borrado}",
-        placeholder="Local: 1.80\nEmpate: 3.20\nVisita: 4.50"
-    )
+with col_right:
+    st.subheader("💰 Cuotas Detectadas")
+    txt_odds = st.text_area("Pega cuotas aquí (ej: 1.80 3.40 4.20):", height=150, key=f"o_{st.session_state.contador}")
 
-if st.button("🗑️ Borrar Todo", use_container_width=True):
-    ejecutar_borrado()
+if st.button("🗑️ Borrar y Siguiente Partido", use_container_width=True):
+    borrar_todo()
     st.rerun()
 
-# --- PROCESAMIENTO ---
-if texto_stats:
-    d = extraer_todo(texto_stats)
-    
-    # Extraer cuotas usando regex (busca números decimales)
-    odds_encontradas = re.findall(r"\d+\.\d+", texto_cuotas)
+# --- CÁLCULO DE VALOR ---
+if txt_stats:
+    d = extraer_datos(txt_stats)
+    odds = identificar_cuotas(txt_odds)
     
     st.divider()
+    st.subheader("📊 Comparativa de Valor (Value Betting)")
     
-    # Análisis de Probabilidad y Valor
-    if d["ganar_empate"]:
-        prob_stats = int(d["ganar_empate"][1])
-        st.subheader(f"📈 Análisis de Probabilidad: {prob_stats}% (Base)")
+    # 1. Análisis de Doble Oportunidad Local (1X)
+    if d["ganar_empate"] and '1X2' in odds:
+        prob_est = int(d["ganar_empate"][1])
+        # Aproximación de cuota 1X basada en Local y Empate
+        c_l, c_e = odds['1X2'][0], odds['1X2'][1]
+        cuota_1x = 1 / ((1/c_l) + (1/c_e))
+        prob_mkt = (1 / cuota_1x) * 100
+        valor = prob_est - prob_mkt
         
-        # Si hay cuotas, calculamos el Value
-        if odds_encontradas:
-            cuota_1x = float(odds_encontradas[0]) # Tomamos la primera cuota como referencia para el ejemplo
-            prob_bookie = (1 / cuota_1x) * 100
-            value = prob_stats - prob_bookie
-            
-            v_col1, v_col2, v_col3 = st.columns(3)
-            v_col1.metric("Cuota Ingresada", cuota_1x)
-            v_col2.metric("Prob. Implícita Casa", f"{round(prob_bookie, 1)}%")
-            v_col3.metric("Valor Detectado", f"{round(value, 1)}%", delta=f"{round(value, 1)}%")
-            
-            if value > 5:
-                st.success(f"🎯 **VALUE BET DETECTADA:** La cuota de {cuota_1x} es superior a lo que dictan las estadísticas.")
-            else:
-                st.warning("⚠️ **SIN VALOR:** La cuota es muy baja para el riesgo estadístico.")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("1X Real (Est.)", f"{prob_est}%")
+        c2.metric("1X Mercado (Odds)", f"{round(prob_mkt, 1)}%")
+        
+        if valor > 5:
+            c3.metric("VALOR", f"+{round(valor, 1)}%", delta="APOSTAR", delta_color="normal")
+            st.success(f"🎯 Value Bet en Doble Oportunidad: Cuota estimada {round(cuota_1x, 2)}")
+        else:
+            c3.metric("VALOR", f"{round(valor, 1)}%", delta="SIN VALOR", delta_color="inverse")
 
-    # Mostrar el resto de métricas que ya teníamos
+    # 2. Análisis de Over 2.5
+    if d["over25"] and 'O/U' in odds:
+        st.divider()
+        prob_over = int(d["over25"][1])
+        cuota_over = odds['O/U'][0]
+        prob_mkt_o = (1 / cuota_over) * 100
+        val_o = prob_over - prob_mkt_o
+        
+        o1, o2, o3 = st.columns(3)
+        o1.metric("Over 2.5 (Est.)", f"{prob_over}%")
+        o2.metric("Over 2.5 (Odds)", f"{round(prob_mkt_o, 1)}%")
+        
+        if val_o > 5:
+            o3.metric("VALOR", f"+{round(val_o, 1)}%", delta="VALOR")
+        else:
+            o3.metric("VALOR", f"{round(val_o, 1)}%", delta="BAJO")
+
+    # Mostrar métricas de eficiencia que ya teníamos
     st.divider()
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if d["btts"]: st.metric("Ambos Marcan", f"{d['btts'][1]}%")
-    with c2:
-        if d["over25"]: st.metric("Over 2.5 Goles", f"{d['over25'][1]}%")
-    with c3:
-        if d["corners"]:
-            total_c = float(d["corners"][0]) + float(d["corners"][1])
-            st.metric("Corners Totales", total_c)
+    if d["goles_c"] and d["remates_arco"]:
+        ef = round(float(d["remates_arco"][1]) / float(d["goles_c"][1]), 2)
+        st.info(f"⚡ Letalidad del Visitante: {ef} remates al arco por gol.")
 
 else:
-    st.info("Pega las estadísticas para activar el comparador de valor.")
+    st.info("Introduce estadísticas para calcular el valor frente a las cuotas.")
