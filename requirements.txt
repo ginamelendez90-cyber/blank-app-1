@@ -3,3 +3,5 @@ numpy
 scipy
 streamlit
 matplotlib
+tesseract-ocr
+tesseract-ocr-spa
