@@ -3,27 +3,31 @@ import pytesseract
 from PIL import Image
 import shutil
 import re
-import numpy as np
 
-# --- CONFIGURACIÓN DE MOTOR ---
+# --- CONFIGURACIÓN DE MOTOR OCR ---
 t_path = shutil.which("tesseract")
 if t_path:
     pytesseract.pytesseract.tesseract_cmd = t_path
 
-st.set_page_config(page_title="Radar de Valor: Time Decay", layout="wide")
+st.set_page_config(page_title="Radar de Valor Pro", layout="wide")
 
-# --- LÓGICA DE TIME DECAY ---
-def calcular_probabilidad_ponderada(n_exitos, n_total, factor_recencia=1.2):
+# --- LÓGICA DE CÁLCULO AVANZADO ---
+def calcular_probabilidad_ajustada(n_exitos, n_total, factor_sos):
     """
-    Ajusta la probabilidad dando más peso a la racha actual.
-    Si los éxitos son recientes, la probabilidad sube.
+    Aplica Time Decay (fijo para últimos partidos) y Ajuste por Rival (SOS).
     """
+    if n_total == 0: return 0
     prob_base = n_exitos / n_total
-    # Aplicamos un ajuste: si el éxito es reciente, multiplicamos por el factor
-    # Esto es una simplificación del decaimiento temporal para datos agregados
-    prob_ajustada = min(prob_base * factor_recencia, 1.0)
-    return round(prob_ajustada * 100, 2)
+    
+    # Time Decay: Premiamos un 15% extra si la racha es reciente (simplificado)
+    prob_decay = min(prob_base * 1.15, 1.0)
+    
+    # SOS: Ajustamos según la fuerza del rival
+    # Si el rival es fuerte (0.8), la probabilidad final baja porque es más difícil ganar.
+    prob_final = (prob_decay * factor_sos) * 100
+    return round(min(prob_final, 100.0), 2)
 
+# --- GESTIÓN DE BORRADO ---
 if 'contador_borrado' not in st.session_state:
     st.session_state.contador_borrado = 0
 
@@ -39,17 +43,30 @@ def extraer_todo(texto):
         "ganar_empate": buscar(r"(\d+)\s*\((\d+)%\)\s*Empató o Ganó"),
         "btts": buscar(r"(\d+)\s*\((\d+)%\)\s*Ambos equipos marcaron"),
         "over25": buscar(r"(\d+)\s*\((\d+)%\)\s*Más de 2\.5 goles"),
+        "invicta": buscar(r"(\d+)\s*\((\d+)%\)\s*Valla invicta"),
         "goles_c": buscar(r"(\d+\.\d+)\s*Goles convertidos\s*(\d+\.\d+)"),
         "remates_arco": buscar(r"(\d+\.\d+)\s*Remates al arco\s*(\d+\.\d+)"),
-        "corners": buscar(r"(\d+\.\d+)\s*Corners\s*(\d+\.\d+)")
+        "corners": buscar(r"(\d+\.\d+)\s*Corners\s*(\d+\.\d+)"),
+        "tarjetas": buscar(r"(\d+\.\d+)\s*Tarjetas\s*(\d+\.\d+)")
     }
 
-st.title("⚽ Radar de Valor con Time Decay")
+st.title("⚽ Consola de Análisis Predictivo")
 
-# --- INPUT ---
+# --- SIDEBAR: AJUSTE SOS ---
+st.sidebar.header("🛡️ Parámetros de Ajuste")
+st.sidebar.info("El SOS ajusta la probabilidad según el nivel del rival de hoy.")
+nivel_rival = st.sidebar.select_slider(
+    "Fuerza del Rival (SOS):",
+    options=[0.7, 0.8, 0.9, 1.0, 1.1, 1.2],
+    value=1.0,
+    help="0.7: Rival Elite | 1.0: Rival Parejo | 1.2: Rival Muy Débil"
+)
+
+# --- APARTADO DE TEXTO ---
+st.subheader("📋 Datos del Partido")
 texto_input = st.text_area(
-    "Pega los datos de 365Scores:",
-    height=150,
+    "Pega aquí el texto de 365Scores:",
+    height=200,
     key=f"campo_texto_{st.session_state.contador_borrado}"
 )
 
@@ -57,48 +74,65 @@ if st.button("🗑️ Borrar", use_container_width=True):
     ejecutar_borrado()
     st.rerun()
 
-# --- PROCESAMIENTO ---
+# --- RESULTADOS ---
 if texto_input:
     d = extraer_todo(texto_input)
     
-    st.subheader("📈 Análisis con Ponderación por Recencia")
-    col1, col2, col3 = st.columns(3)
+    # FILA 1: Probabilidades Ajustadas (Time Decay + SOS)
+    st.divider()
+    st.subheader("📈 Probabilidades Reales (Ajustadas)")
+    c1, c2, c3, c4 = st.columns(4)
+    
+    with c1:
+        if d["ganar_empate"]:
+            prob_ajustada = calcular_probabilidad_ajustada(int(d["ganar_empate"][0]), 9, nivel_rival)
+            st.metric("1X Ajustado", f"{prob_ajustada}%", delta=f"{round(prob_ajustada - int(d['ganar_empate'][1]), 1)}%")
 
-    if d["ganar_empate"]:
-        # Aplicamos Time Decay al 1X
-        exitos = int(d["ganar_empate"][0])
-        total = 9 # Basado en tu captura de "Últimos 9 partidos"
-        prob_ponderada = calcular_probabilidad_ponderada(exitos, total)
-        
-        with col1:
-            st.metric("1X Ponderado (Time Decay)", f"{prob_ponderada}%", 
-                      delta=f"{prob_ponderada - int(d['ganar_empate'][1])}% vs Base")
-            st.caption("Le da más peso a los últimos 3 partidos.")
+    with c2:
+        if d["btts"]:
+            st.metric("Ambos Marcan", f"{d['btts'][1]}%")
 
-    with col2:
+    with c3:
         if d["over25"]:
             st.metric("Over 2.5 Goles", f"{d['over25'][1]}%")
 
-    with col3:
+    with c4:
+        if d["invicta"]:
+            st.metric("Arco en 0 (L)", f"{d['invicta'][1]}%")
+
+    # FILA 2: Eficiencia Ofensiva
+    st.divider()
+    st.subheader("🎯 Análisis de Eficiencia (Visitante)")
+    f2_c1, f2_c2, f2_c3 = st.columns(3)
+
+    if d["goles_c"] and d["remates_arco"]:
+        # Letalidad: Tiros al arco necesarios para 1 gol
+        letalidad = round(float(d["remates_arco"][1]) / float(d["goles_c"][1]), 2)
+        f2_c1.metric("Letalidad", f"{letalidad} tiros/gol")
+        f2_c2.metric("Prom. Goles", d["goles_c"][1])
+        f2_c3.metric("Remates al Arco", d["remates_arco"][1])
+
+    # FILA 3: Mercados de Volumen
+    st.divider()
+    f3_c1, f3_c2 = st.columns(2)
+    with f3_c1:
         if d["corners"]:
             total_c = float(d["corners"][0]) + float(d["corners"][1])
-            st.metric("Corners Proyectados", total_c)
+            st.write(f"🚩 **Corners Proyectados:** {total_c}")
+            st.progress(min(total_c/16, 1.0))
+    with f3_c2:
+        if d["tarjetas"]:
+            total_t = float(d["tarjetas"][0]) + float(d["tarjetas"][1])
+            st.write(f"🟨 **Tarjetas Proyectadas:** {total_t}")
+            st.progress(min(total_t/10, 1.0))
 
-    # --- RECOMENDACIÓN CON TIME DECAY ---
+    # RECOMENDACIÓN FINAL
     st.divider()
-    st.subheader("🤖 Recomendación Estratégica")
-    
     if d["ganar_empate"]:
-        prob_final = calcular_probabilidad_ponderada(int(d["ganar_empate"][0]), 9)
-        
-        if prob_final >= 85:
-            st.success(f"🏆 **PICK DE ALTA RECENCIA:** Local o Empate (1X).")
-            st.write("El modelo detecta que la racha reciente es más sólida que el promedio histórico.")
-        elif d["goles_c"] and float(d["goles_c"][1]) > 1.70:
-            st.warning("🔥 **PICK POR MOMENTUM:** Over 1.5 Goles Visitante.")
-            st.write("El visitante llega con una inercia goleadora superior a su media de la temporada.")
+        score_final = calcular_probabilidad_ajustada(int(d["ganar_empate"][0]), 9, nivel_rival)
+        if score_final >= 80:
+            st.success(f"🏆 **PICK RECOMENDADO:** Doble Oportunidad Local (1X). Confianza sólida ajustada: {score_final}%")
+        elif float(d["goles_c"][1]) > 1.85 and letalidad < 3.5:
+            st.warning("🔥 **PICK RECOMENDADO:** Over 1.5 Goles Visitante (Alta Letalidad Detectada)")
         else:
-            st.info("⚖️ **ESTADO:** Momentum neutro. No hay ventaja clara por recencia.")
-
-else:
-    st.info("Pega los datos para aplicar el modelo de Time Decay.")
+            st.info("⚖️ **ESTADO:** Sin ventaja estadística clara. Considerar mercado de Corners.")
