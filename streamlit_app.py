@@ -4,85 +4,89 @@ from PIL import Image
 import shutil
 import re
 
-# Configuración del motor OCR
+# --- CONFIGURACIÓN DE TESSERACT ---
 t_path = shutil.which("tesseract")
 if t_path:
     pytesseract.pytesseract.tesseract_cmd = t_path
 
-st.set_page_config(page_title="Radar de Valor Pro", layout="wide")
-st.title("⚽ Analizador Estadístico Multimodal")
+st.set_page_config(page_title="Radar de Valor Avanzado", layout="wide")
 
-# --- BARRA LATERAL PARA ENTRADA DE DATOS ---
-st.sidebar.header("📥 Entrada de Datos")
-metodo = st.sidebar.radio("Selecciona método:", ["Imagen (OCR)", "Pegar Texto"])
-
-texto_final = ""
-
-if metodo == "Imagen (OCR)":
-    archivo = st.sidebar.file_uploader("Sube la captura", type=['png', 'jpg', 'jpeg'])
-    if archivo:
-        img = Image.open(archivo)
-        st.image(img, width=400)
-        with st.spinner("Procesando imagen..."):
-            texto_final = pytesseract.image_to_string(img, lang='spa')
-else:
-    texto_pepago = st.sidebar.text_area("Pega aquí los datos copiados:", height=300, placeholder="Todas las competiciones...")
-    if texto_pepago:
-        texto_final = texto_pepago
-
-# --- LÓGICA DE PROCESAMIENTO ---
-if texto_final:
-    st.subheader("📝 Análisis de Resultados")
-    
-    # Función para extraer datos con Regex
-    def buscar(patron, string):
-        m = re.search(patron, string, re.IGNORECASE)
+# --- LÓGICA DE EXTRACCIÓN MEJORADA ---
+def extraer_datos_avanzados(texto):
+    def buscar(patron):
+        m = re.search(patron, texto, re.IGNORECASE)
         return m.groups() if m else None
 
-    # Extracción de porcentajes y promedios
-    # Adaptado para el formato de texto pegado que enviaste
-    datos = {
-        "btts": buscar(r"(\d+)\s*\((\d+)%\)\s*Ambos equipos marcaron", texto_final),
-        "over25": buscar(r"(\d+)\s*\((\d+)%\)\s*Más de 2\.5 goles", texto_final),
-        "invicta": buscar(r"(\d+)\s*\((\d+)%\)\s*Valla invicta", texto_final),
-        "goles_c": buscar(r"(\d+\.\d+)\s*Goles convertidos\s*(\d+\.\d+)", texto_final),
-        "remates": buscar(r"(\d+\.\d+)\s*Remates\s*(\d+\.\d+)", texto_final)
+    return {
+        "ganar_empate": buscar(r"(\d+)%\s*Empató o Ganó\s*(\d+)%"),
+        "goles_c": buscar(r"(\d+\.\d+)\s*Goles convertidos\s*(\d+\.\d+)"),
+        "remates_arco": buscar(r"(\d+\.\d+)\s*Remates al arco\s*(\d+\.\d+)"),
+        "corners": buscar(r"(\d+\.\d+)\s*Corners\s*(\d+\.\d+)"),
+        "tarjetas": buscar(r"(\d+\.\d+)\s*Tarjetas\s*(\d+\.\d+)")
     }
 
-    col1, col2, col3 = st.columns(3)
+# --- INTERFAZ ---
+st.title("⚽ Radar de Valor: Inteligencia de Mercados")
+st.sidebar.header("Entrada de Datos")
+metodo = st.sidebar.radio("Método:", ["Pegar Texto", "Imagen (OCR)"])
 
-    # Mostrar Métricas en pantalla
-    with col1:
-        if datos["btts"]:
-            st.metric("BTTS (Local)", f"{datos['btts'][1]}%")
-        if datos["goles_c"]:
-            st.metric("Goles Conv. (Local)", datos["goles_c"][0])
+texto_analizar = ""
+if metodo == "Pegar Texto":
+    texto_analizar = st.sidebar.text_area("Pega los datos de 365Scores aquí:", height=250)
+else:
+    archivo = st.sidebar.file_uploader("Sube captura", type=['png', 'jpg'])
+    if archivo:
+        texto_analizar = pytesseract.image_to_string(Image.open(archivo), lang='spa')
 
-    with col2:
-        if datos["over25"]:
-            st.metric("Over 2.5 (Local)", f"{datos['over25'][1]}%")
-        if datos["goles_c"]:
-            st.metric("Goles Conv. (Visita)", datos["goles_c"][1])
+if texto_analizar:
+    data = extraer_datos_avanzados(texto_analizar)
+    
+    # --- BLOQUE 1: EFICIENCIA OFENSIVA (NUEVO) ---
+    st.subheader("🔥 Eficiencia y Peligrosidad")
+    c1, c2, c3 = st.columns(3)
+    
+    if data["goles_c"] and data["remates_arco"]:
+        # Cálculo de Efectividad (Remates al arco para hacer 1 gol)
+        ef_loc = round(float(data["remates_arco"][0]) / float(data["goles_c"][0]), 2)
+        ef_vis = round(float(data["remates_arco"][1]) / float(data["goles_c"][1]), 2)
+        
+        c1.metric("Efectividad Local", f"{ef_loc} tiros/gol", delta_color="inverse")
+        c2.metric("Efectividad Visita", f"{ef_vis} tiros/gol", delta_color="inverse")
+        c3.metric("Peligro Visita", f"{data['remates_arco'][1]} tiros a puerta")
 
-    with col3:
-        if datos["invicta"]:
-            st.metric("Valla Invicta (Local)", f"{datos['invicta'][1]}%")
-        if datos["remates"]:
-            st.metric("Remates (Visita)", datos["remates"][1])
+    # --- BLOQUE 2: PROYECCIÓN DE CORNERS Y TARJETAS (NUEVO) ---
+    st.divider()
+    col_a, col_b = st.columns(2)
+    
+    with col_a:
+        st.write("### 🚩 Mercado de Corners")
+        if data["corners"]:
+            total_corners = float(data["corners"][0]) + float(data["corners"][1])
+            st.write(f"**Promedio Total:** {total_corners} por partido")
+            if total_corners > 10.5:
+                st.success("Sugerencia: Over 9.5 Corners (Tendencia Alta)")
+            else:
+                st.info("Sugerencia: Under 11.5 Corners")
 
-    # --- RECOMENDACIÓN FINAL ---
+    with col_b:
+        st.write("### 🟨 Mercado de Disciplina")
+        if data["tarjetas"]:
+            total_t = float(data["tarjetas"][0]) + float(data["tarjetas"][1])
+            st.write(f"**Intensidad:** {total_t} tarjetas/partido")
+            if total_t > 4.5:
+                st.warning("Sugerencia: Over 3.5 Tarjetas (Partido Friccionado)")
+
+    # --- BLOQUE 3: DECISIÓN FINAL BASADA EN TUS REGLAS ---
     st.divider()
     st.subheader("🤖 Recomendación Estratégica")
     
-    # Ejemplo de lógica basada en tus preferencias de apuestas
-    if datos["invicta"] and int(datos["invicta"][1]) >= 25 and datos["goles_c"] and float(datos["goles_c"][1]) > 1.80:
-        st.success("🎯 **OPCIÓN DE VALOR:** Gana Visitante o Empate + Over 1.5 goles")
-        st.write("Razón: El visitante tiene un promedio de gol muy alto (1.91) frente a una defensa local moderada.")
-    elif datos["btts"] and int(datos["btts"][1]) >= 60:
-        st.warning("⚽ **ALTA PROBABILIDAD:** Ambos Equipos Marcan")
-        st.write("Razón: Historial reciente muestra una tendencia clara de intercambio de goles.")
-    else:
-        st.info("⚖️ **ESTADO:** Partido equilibrado. Se recomienda mercado de Corners o esperar al Live.")
-
+    if data["ganar_empate"]:
+        prob_local = int(data["ganar_empate"][0])
+        if prob_local >= 80:
+            st.success("🏆 PICK PRINCIPAL: Doble Oportunidad Local (1X)")
+            st.write(f"Fundamento: Imbatibilidad del {prob_local}% en casa.")
+        elif data["goles_c"] and float(data["goles_c"][1]) > 1.80:
+            st.warning("🚀 PICK ALTERNATIVO: Gana Visitante (DNB)")
+            st.write("Fundamento: Alta eficiencia goleadora del visitante (1.91 goles/partido).")
 else:
-    st.info("Esperando datos... Por favor, sube una imagen o pega el texto en la barra lateral.")
+    st.info("Sube o pega los datos para iniciar el análisis estadístico.")
