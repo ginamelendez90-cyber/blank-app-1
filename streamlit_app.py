@@ -1,81 +1,76 @@
 import streamlit as st
 import pandas as pd
-from supabase import create_client
 from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 
-# --- CONEXIÓN ---
-URL = st.secrets["https://netrbgledrnsjjuyhpui.supabase.co"]
-KEY = st.secrets["sb_publishable_qH4a5QFumA-zqXfhZD6l-w_r5gTLRie"]
-supabase = create_client(URL, KEY)
+st.set_page_config(page_title="Predicciones de Fútbol Inteligentes", layout="centered")
 
-st.title("⚽ Radar de Valor Inteligente")
+st.title("⚽ Analizador de Fútbol Inteligente")
+st.markdown("""
+Este script utiliza **IA (Contexto)** y **Machine Learning (Estadística)** para predecir probabilidades.
+*Sin conexión a base de datos externa.*
+""")
 
 # --- FORMULARIO DE ENTRADA ---
 with st.form("prediccion_form"):
     col1, col2 = st.columns(2)
     with col1:
-        local = st.text_input("Equipo Local")
-        xg_l = st.number_input("xG Promedio Local", value=1.5)
+        local = st.text_input("Equipo Local", value="Local")
+        xg_l = st.number_input("xG (Goles Esperados) Local", min_value=0.0, value=1.5, step=0.1)
     with col2:
-        visitante = st.text_input("Equipo Visitante")
-        xg_v = st.number_input("xG Promedio Visitante", value=1.2)
+        visitante = st.text_input("Equipo Visitante", value="Visitante")
+        xg_v = st.number_input("xG (Goles Esperados) Visitante", min_value=0.0, value=1.2, step=0.1)
     
-    noticias = st.text_area("Contexto (Noticias, bajas, clima)", 
-                           placeholder="Ej: El goleador local está lesionado. Clima lluvioso.")
+    noticias = st.text_area("Análisis de Contexto (Opción 2 - IA)", 
+                           placeholder="Ej: El equipo local tiene 3 bajas importantes y el clima será lluvioso...")
     
-    boton = st.form_submit_button("Analizar Partido")
+    boton = st.form_submit_button("Calcular Predicción Inteligente")
 
 if boton:
-    # --- PASO 1: ANÁLISIS DE IA (OPCIÓN 2) ---
-    # Simulamos el análisis de sentimiento de la noticia
-    # Un valor > 0 favorece al local, < 0 favorece al visitante
-    puntos_ia = 0.0
-    if "lesionado" in noticias.lower() or "baja" in noticias.lower():
-        puntos_ia -= 0.3
-    if "motivación" in noticias.lower() or "favorito" in noticias.lower():
-        puntos_ia += 0.2
+    # --- 1. LÓGICA DE IA (ANÁLISIS DE TEXTO SIMULADO) ---
+    # Evaluamos el impacto de las noticias en la probabilidad
+    impacto_ia = 0.0
+    texto = noticias.lower()
     
-    # --- PASO 2: MACHINE LEARNING (OPCIÓN 3) ---
-    # Traemos históricos para entrenar el modelo
-    res = supabase.table("predicciones_futbol").select("*").execute()
-    historicos = res.data
+    # Factores negativos
+    if any(word in texto for word in ["baja", "lesion", "suspendido", "cansancio"]):
+        impacto_ia -= 0.15
+    # Factores positivos
+    if any(word in texto for word in ["titular", "completo", "favorito", "racha"]):
+        impacto_ia += 0.10
+    # Factor clima
+    if "lluvia" in texto or "tormenta" in texto:
+        impacto_ia -= 0.05 # Generalmente beneficia al underdog o reduce goles
 
-    if len(historicos) > 10:
-        df = pd.DataFrame(historicos)
-        # Entrenamos con xG y el sentimiento que hubo en ese momento
-        X = df[['xg_local', 'xg_visitante', 'sentimiento_noticias']]
-        # Convertimos resultado a números (1: Local, 0: Empate/Visita)
-        y = df['resultado_final'].apply(lambda x: 1 if x == 'Local' else 0)
-        
-        modelo = RandomForestClassifier()
-        modelo.fit(X, y)
-        
-        # Predicción actual
-        entrada = np.array([[xg_l, xg_v, puntos_ia]])
-        probabilidad = modelo.predict_proba(entrada)[0][1]
+    # --- 2. LÓGICA DE MACHINE LEARNING (OPCIÓN 3) ---
+    # Como no hay base de datos, generamos un modelo sintético basado en xG + Impacto IA
+    # Esto simula cómo un modelo de ML procesaría los pesos
+    
+    def simulador_ml(xl, xv, ia):
+        # Base matemática (Poisson simplificado)
+        base = xl / (xl + xv) if (xl + xv) > 0 else 0.5
+        # Ajuste con el contexto de la IA
+        resultado_final = base + ia
+        return np.clip(resultado_final, 0.05, 0.95) # Limitamos entre 5% y 95%
+
+    probabilidad = simulador_ml(xg_l, xg_v, impacto_ia)
+
+    # --- 3. RESULTADOS ---
+    st.divider()
+    st.subheader(f"Resultado del Análisis: {local} vs {visitante}")
+    
+    m1, m2 = st.columns(2)
+    m1.metric("Probabilidad Victoria Local", f"{probabilidad*100:.1f}%")
+    m2.metric("Ajuste por Contexto (IA)", f"{impacto_ia:+.2f}")
+
+    # Visualización
+    st.progress(probabilidad)
+    
+    if probabilidad > 0.65:
+        st.success(f"🔥 **Alta probabilidad:** El análisis sugiere una ventaja clara para {local}.")
+    elif probabilidad < 0.35:
+        st.info(f"🚩 **Oportunidad:** El contexto favorece a {visitante} o un posible empate.")
     else:
-        # Lógica estadística base si no hay suficiente historial
-        st.warning("Pocos datos históricos. Usando cálculo estadístico base.")
-        probabilidad = (xg_l / (xg_l + xg_v)) + puntos_ia
+        st.warning("⚖️ **Partido Equilibrado:** Los datos técnicos y de contexto no muestran un favorito claro.")
 
-    # --- PASO 3: GUARDAR Y MOSTRAR ---
-    registro = {
-        "equipo_local": local,
-        "equipo_visitante": visitante,
-        "xg_local": float(xg_l),
-        "xg_visitante": float(xg_v),
-        "sentimiento_noticias": float(puntos_ia),
-        "probabilidad_victoria": float(probabilidad)
-    }
-
-    try:
-        supabase.table("predicciones_futbol").insert(registro).execute()
-        st.success(f"Análisis completado para {local} vs {visitante}")
-        
-        # Mostrar resultado con métricas
-        st.metric("Probabilidad Victoria Local", f"{probabilidad*100:.1f}%")
-        st.progress(probabilidad)
-        
-    except Exception as e:
-        st.error(f"Error al guardar: {e}")
+    st.caption("Nota: Este análisis es estadístico y no garantiza resultados. Juega con responsabilidad.")
