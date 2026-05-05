@@ -9,25 +9,9 @@ t_path = shutil.which("tesseract")
 if t_path:
     pytesseract.pytesseract.tesseract_cmd = t_path
 
-st.set_page_config(page_title="Radar de Valor Pro", layout="wide")
+st.set_page_config(page_title="Radar de Valor Pro: Odds Edition", layout="wide")
 
-# --- LÓGICA DE CÁLCULO AVANZADO ---
-def calcular_probabilidad_ajustada(n_exitos, n_total, factor_sos):
-    """
-    Aplica Time Decay (fijo para últimos partidos) y Ajuste por Rival (SOS).
-    """
-    if n_total == 0: return 0
-    prob_base = n_exitos / n_total
-    
-    # Time Decay: Premiamos un 15% extra si la racha es reciente (simplificado)
-    prob_decay = min(prob_base * 1.15, 1.0)
-    
-    # SOS: Ajustamos según la fuerza del rival
-    # Si el rival es fuerte (0.8), la probabilidad final baja porque es más difícil ganar.
-    prob_final = (prob_decay * factor_sos) * 100
-    return round(min(prob_final, 100.0), 2)
-
-# --- GESTIÓN DE BORRADO ---
+# --- LÓGICA DE BORRADO FÍSICO ---
 if 'contador_borrado' not in st.session_state:
     st.session_state.contador_borrado = 0
 
@@ -43,96 +27,79 @@ def extraer_todo(texto):
         "ganar_empate": buscar(r"(\d+)\s*\((\d+)%\)\s*Empató o Ganó"),
         "btts": buscar(r"(\d+)\s*\((\d+)%\)\s*Ambos equipos marcaron"),
         "over25": buscar(r"(\d+)\s*\((\d+)%\)\s*Más de 2\.5 goles"),
-        "invicta": buscar(r"(\d+)\s*\((\d+)%\)\s*Valla invicta"),
         "goles_c": buscar(r"(\d+\.\d+)\s*Goles convertidos\s*(\d+\.\d+)"),
         "remates_arco": buscar(r"(\d+\.\d+)\s*Remates al arco\s*(\d+\.\d+)"),
         "corners": buscar(r"(\d+\.\d+)\s*Corners\s*(\d+\.\d+)"),
-        "tarjetas": buscar(r"(\d+\.\d+)\s*Tarjetas\s*(\d+\.\d+)")
     }
 
-st.title("⚽ Consola de Análisis Predictivo")
+# --- INTERFAZ ---
+st.title("⚽ Consola de Análisis + Comparador de Cuotas")
 
-# --- SIDEBAR: AJUSTE SOS ---
-st.sidebar.header("🛡️ Parámetros de Ajuste")
-st.sidebar.info("El SOS ajusta la probabilidad según el nivel del rival de hoy.")
-nivel_rival = st.sidebar.select_slider(
-    "Fuerza del Rival (SOS):",
-    options=[0.7, 0.8, 0.9, 1.0, 1.1, 1.2],
-    value=1.0,
-    help="0.7: Rival Elite | 1.0: Rival Parejo | 1.2: Rival Muy Débil"
-)
+# --- APARTADO DE ENTRADA DE DATOS ---
+col_stats, col_odds = st.columns(2)
 
-# --- APARTADO DE TEXTO ---
-st.subheader("📋 Datos del Partido")
-texto_input = st.text_area(
-    "Pega aquí el texto de 365Scores:",
-    height=200,
-    key=f"campo_texto_{st.session_state.contador_borrado}"
-)
+with col_stats:
+    st.subheader("📋 Estadísticas (365Scores)")
+    texto_stats = st.text_area(
+        "Pega los datos del partido aquí:",
+        height=150,
+        key=f"stats_{st.session_state.contador_borrado}"
+    )
 
-if st.button("🗑️ Borrar", use_container_width=True):
+with col_odds:
+    st.subheader("💰 Cuotas (Bookie)")
+    texto_cuotas = st.text_area(
+        "Pega las cuotas (ej: 1.85, 3.40):",
+        height=150,
+        key=f"odds_{st.session_state.contador_borrado}",
+        placeholder="Local: 1.80\nEmpate: 3.20\nVisita: 4.50"
+    )
+
+if st.button("🗑️ Borrar Todo", use_container_width=True):
     ejecutar_borrado()
     st.rerun()
 
-# --- RESULTADOS ---
-if texto_input:
-    d = extraer_todo(texto_input)
+# --- PROCESAMIENTO ---
+if texto_stats:
+    d = extraer_todo(texto_stats)
     
-    # FILA 1: Probabilidades Ajustadas (Time Decay + SOS)
+    # Extraer cuotas usando regex (busca números decimales)
+    odds_encontradas = re.findall(r"\d+\.\d+", texto_cuotas)
+    
     st.divider()
-    st.subheader("📈 Probabilidades Reales (Ajustadas)")
-    c1, c2, c3, c4 = st.columns(4)
     
+    # Análisis de Probabilidad y Valor
+    if d["ganar_empate"]:
+        prob_stats = int(d["ganar_empate"][1])
+        st.subheader(f"📈 Análisis de Probabilidad: {prob_stats}% (Base)")
+        
+        # Si hay cuotas, calculamos el Value
+        if odds_encontradas:
+            cuota_1x = float(odds_encontradas[0]) # Tomamos la primera cuota como referencia para el ejemplo
+            prob_bookie = (1 / cuota_1x) * 100
+            value = prob_stats - prob_bookie
+            
+            v_col1, v_col2, v_col3 = st.columns(3)
+            v_col1.metric("Cuota Ingresada", cuota_1x)
+            v_col2.metric("Prob. Implícita Casa", f"{round(prob_bookie, 1)}%")
+            v_col3.metric("Valor Detectado", f"{round(value, 1)}%", delta=f"{round(value, 1)}%")
+            
+            if value > 5:
+                st.success(f"🎯 **VALUE BET DETECTADA:** La cuota de {cuota_1x} es superior a lo que dictan las estadísticas.")
+            else:
+                st.warning("⚠️ **SIN VALOR:** La cuota es muy baja para el riesgo estadístico.")
+
+    # Mostrar el resto de métricas que ya teníamos
+    st.divider()
+    c1, c2, c3 = st.columns(3)
     with c1:
-        if d["ganar_empate"]:
-            prob_ajustada = calcular_probabilidad_ajustada(int(d["ganar_empate"][0]), 9, nivel_rival)
-            st.metric("1X Ajustado", f"{prob_ajustada}%", delta=f"{round(prob_ajustada - int(d['ganar_empate'][1]), 1)}%")
-
+        if d["btts"]: st.metric("Ambos Marcan", f"{d['btts'][1]}%")
     with c2:
-        if d["btts"]:
-            st.metric("Ambos Marcan", f"{d['btts'][1]}%")
-
+        if d["over25"]: st.metric("Over 2.5 Goles", f"{d['over25'][1]}%")
     with c3:
-        if d["over25"]:
-            st.metric("Over 2.5 Goles", f"{d['over25'][1]}%")
-
-    with c4:
-        if d["invicta"]:
-            st.metric("Arco en 0 (L)", f"{d['invicta'][1]}%")
-
-    # FILA 2: Eficiencia Ofensiva
-    st.divider()
-    st.subheader("🎯 Análisis de Eficiencia (Visitante)")
-    f2_c1, f2_c2, f2_c3 = st.columns(3)
-
-    if d["goles_c"] and d["remates_arco"]:
-        # Letalidad: Tiros al arco necesarios para 1 gol
-        letalidad = round(float(d["remates_arco"][1]) / float(d["goles_c"][1]), 2)
-        f2_c1.metric("Letalidad", f"{letalidad} tiros/gol")
-        f2_c2.metric("Prom. Goles", d["goles_c"][1])
-        f2_c3.metric("Remates al Arco", d["remates_arco"][1])
-
-    # FILA 3: Mercados de Volumen
-    st.divider()
-    f3_c1, f3_c2 = st.columns(2)
-    with f3_c1:
         if d["corners"]:
             total_c = float(d["corners"][0]) + float(d["corners"][1])
-            st.write(f"🚩 **Corners Proyectados:** {total_c}")
-            st.progress(min(total_c/16, 1.0))
-    with f3_c2:
-        if d["tarjetas"]:
-            total_t = float(d["tarjetas"][0]) + float(d["tarjetas"][1])
-            st.write(f"🟨 **Tarjetas Proyectadas:** {total_t}")
-            st.progress(min(total_t/10, 1.0))
+            st.metric("Corners Totales", total_c)
 
-    # RECOMENDACIÓN FINAL
-    st.divider()
-    if d["ganar_empate"]:
-        score_final = calcular_probabilidad_ajustada(int(d["ganar_empate"][0]), 9, nivel_rival)
-        if score_final >= 80:
-            st.success(f"🏆 **PICK RECOMENDADO:** Doble Oportunidad Local (1X). Confianza sólida ajustada: {score_final}%")
-        elif float(d["goles_c"][1]) > 1.85 and letalidad < 3.5:
-            st.warning("🔥 **PICK RECOMENDADO:** Over 1.5 Goles Visitante (Alta Letalidad Detectada)")
-        else:
-            st.info("⚖️ **ESTADO:** Sin ventaja estadística clara. Considerar mercado de Corners.")
+else:
+    st.info("Pega las estadísticas para activar el comparador de valor.")
