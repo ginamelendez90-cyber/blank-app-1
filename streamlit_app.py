@@ -1,76 +1,69 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+from scipy.stats import poisson
 
-st.set_page_config(page_title="Predicciones Pro", layout="wide")
+st.set_page_config(page_title="Predicción Matemática Pro", layout="wide")
 
-st.title("⚽ Sistema de Predicción de Fútbol Avanzado")
+st.title("⚽ Análisis Estadístico: Distribución de Poisson")
 
-with st.form("analisis_avanzado"):
-    col1, col2, col3 = st.columns(3)
+with st.sidebar:
+    st.header("Parámetros del Modelo")
+    # El xG ajustado sirve como el parámetro 'lambda' (λ) de Poisson
+    lambda_local = st.number_input("λ Local (Goles esperados ajustados)", value=1.65, step=0.1)
+    lambda_visita = st.number_input("λ Visita (Goles esperados ajustados)", value=1.20, step=0.1)
+
+def calcular_probabilidades_goles(l_local, l_visita):
+    # Calculamos probabilidades de 0 a 5 goles para cada equipo
+    prob_goles_local = [poisson.pmf(i, l_local) for i in range(6)]
+    prob_goles_visita = [poisson.pmf(i, l_visita) for i in range(6)]
     
-    with col1:
-        st.subheader("🏠 Local")
-        local = st.text_input("Nombre", value="Equipo A")
-        xg_l = st.number_input("xG (Goles Esperados)", value=1.6, step=0.1)
-        forma_l = st.slider("Forma (0-100%)", 0, 100, 50, key="fl")
-        bajas_l = st.multiselect("Bajas Locales", ["Portero Titular", "Defensa Central", "Goleador", "Mediocentro Creativo"])
-
-    with col2:
-        st.subheader("🚀 Visitante")
-        visitante = st.text_input("Nombre ", value="Equipo B")
-        xg_v = st.number_input("xG (Goles Esperados) ", value=1.1, step=0.1)
-        forma_v = st.slider("Forma (0-100%)", 0, 100, 50, key="fv")
-        bajas_v = st.multiselect("Bajas Visitantes", ["Portero Titular", "Defensa Central", "Goleador", "Mediocentro Creativo"])
-
-    with col3:
-        st.subheader("🧠 Contexto e IA")
-        importancia = st.select_slider("Importancia del Partido", options=["Baja", "Media", "Alta", "Crítica"])
-        clima = st.selectbox("Clima", ["Despejado", "Lluvia", "Calor Extremo", "Nieve"])
-        motivacion = st.radio("Motivación Extra", ["Ninguna", "Clásico/Derbi", "Pelea Descenso", "Pelea Título"])
-
-    boton_pro = st.form_submit_button("Ejecutar Análisis de Valor")
-
-if boton_pro:
-    # --- PROCESAMIENTO DE IA (PONDERACIÓN DE VARIABLES) ---
-    # Calculamos penalizaciones por bajas
-    penalizacion_l = len(bajas_l) * 0.08
-    penalizacion_v = len(bajas_v) * 0.08
+    # Matriz de marcadores exactos
+    matriz_marcadores = np.outer(prob_goles_local, prob_goles_visita)
     
-    # Ajuste por forma y motivación (Simulando lógica de ML)
-    ajuste_forma = (forma_l - forma_v) / 200 # Max +/- 0.5
+    # Probabilidades principales
+    prob_over_2_5 = 0
+    prob_ambos_marcan = (1 - prob_goles_local[0]) * (1 - prob_goles_visita[0])
     
-    # Impacto del clima (La lluvia suele reducir la brecha técnica)
-    ajuste_clima = -0.05 if clima == "Lluvia" and xg_l > xg_v else 0
-    
-    # --- CÁLCULO DE PROBABILIDAD (MODELO HÍBRIDO) ---
-    base_stats = (xg_l - penalizacion_l) / ((xg_l - penalizacion_l) + (xg_v - penalizacion_v))
-    prob_final = base_stats + ajuste_forma + ajuste_clima
-    
-    if motivacion == "Clásico/Derbi":
-        prob_final = (prob_final + 0.5) / 2 # Tiende al equilibrio (50/50)
+    for i in range(6):
+        for j in range(6):
+            if (i + j) > 2.5:
+                prob_over_2_5 += matriz_marcadores[i, j]
+                
+    return matriz_marcadores, prob_over_2_5, prob_ambos_marcan
 
-    prob_final = np.clip(prob_final, 0.01, 0.99)
+# --- CÁLCULOS ---
+matriz, over25, btts = calcular_probabilidades_goles(lambda_local, lambda_visita)
 
-    # --- DESPLIEGUE DE RESULTADOS ---
-    st.divider()
-    c1, c2, c3 = st.columns(3)
-    
-    with c1:
-        st.metric("Prob. Victoria Local", f"{prob_final*100:.1f}%")
-    with c2:
-        st.metric("Prob. Empate/Visita", f"{(1-prob_final)*100:.1f}%")
-    with c3:
-        # Cálculo de cuota justa (Fair Odds)
-        cuota_justa = 1 / prob_final if prob_final > 0 else 0
-        st.metric("Cuota Justa Sugerida", f"{cuota_justa:.2f}")
+# --- VISUALIZACIÓN ---
+col1, col2, col3 = st.columns(3)
 
-    # Mensaje Inteligente
-    if prob_final > 0.70:
-        st.success(f"✅ FUERTE: {local} llega con métricas dominantes.")
-    elif prob_final < 0.40:
-        st.warning(f"⚠️ ALERTA: {visitante} tiene valor estadístico o el contexto le favorece.")
-    else:
-        st.info("⚖️ EQUILIBRIO: Las variables sugieren un partido cerrado.")
+with col1:
+    st.metric("Probabilidad Over 2.5 Goles", f"{over25*100:.1f}%")
+    st.write("Cuota Justa O2.5:", f"{1/over25:.2f}" if over25 > 0 else "0")
 
-    st.progress(prob_final)
+with col2:
+    st.metric("Probabilidad Ambos Marcan (BTTS)", f"{btts*100:.1f}%")
+    st.write("Cuota Justa BTTS:", f"{1/btts:.2f}" if btts > 0 else "0")
+
+with col3:
+    # Encontrar el marcador más probable
+    idx = np.unravel_index(np.argmax(matriz), matriz.shape)
+    st.metric("Marcador más Probable", f"{idx[0]} - {idx[1]}")
+    st.write("Confianza del marcador:", f"{matriz[idx]*100:.1f}%")
+
+st.divider()
+
+# --- TABLA DE PROBABILIDADES DE MARCADOR EXACTO ---
+st.subheader("📊 Matriz de Probabilidades (Marcador Exacto)")
+df_matriz = pd.DataFrame(
+    matriz, 
+    columns=[f"Visita {i}" for i in range(6)], 
+    index=[f"Local {i}" for i in range(6)]
+)
+st.dataframe(df_matriz.style.format("{:.2%}").background_gradient(cmap='Greens'))
+
+st.info("""
+**¿Cómo leer esto?**
+La Distribución de Poisson calcula la probabilidad de que un equipo anote 'X' goles basándose en su promedio (λ). 
+La matriz muestra la intersección de ambos equipos; las celdas más oscuras indican los resultados más probables matemáticamente.
+""")
