@@ -1,76 +1,76 @@
 import streamlit as st
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 
-st.set_page_config(page_title="Predicciones de Fútbol Inteligentes", layout="centered")
+st.set_page_config(page_title="Predicciones Pro", layout="wide")
 
-st.title("⚽ Analizador de Fútbol Inteligente")
-st.markdown("""
-Este script utiliza **IA (Contexto)** y **Machine Learning (Estadística)** para predecir probabilidades.
-*Sin conexión a base de datos externa.*
-""")
+st.title("⚽ Sistema de Predicción de Fútbol Avanzado")
 
-# --- FORMULARIO DE ENTRADA ---
-with st.form("prediccion_form"):
-    col1, col2 = st.columns(2)
+with st.form("analisis_avanzado"):
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
-        local = st.text_input("Equipo Local", value="Local")
-        xg_l = st.number_input("xG (Goles Esperados) Local", min_value=0.0, value=1.5, step=0.1)
+        st.subheader("🏠 Local")
+        local = st.text_input("Nombre", value="Equipo A")
+        xg_l = st.number_input("xG (Goles Esperados)", value=1.6, step=0.1)
+        forma_l = st.slider("Forma (0-100%)", 0, 100, 50, key="fl")
+        bajas_l = st.multiselect("Bajas Locales", ["Portero Titular", "Defensa Central", "Goleador", "Mediocentro Creativo"])
+
     with col2:
-        visitante = st.text_input("Equipo Visitante", value="Visitante")
-        xg_v = st.number_input("xG (Goles Esperados) Visitante", min_value=0.0, value=1.2, step=0.1)
-    
-    noticias = st.text_area("Análisis de Contexto (Opción 2 - IA)", 
-                           placeholder="Ej: El equipo local tiene 3 bajas importantes y el clima será lluvioso...")
-    
-    boton = st.form_submit_button("Calcular Predicción Inteligente")
+        st.subheader("🚀 Visitante")
+        visitante = st.text_input("Nombre ", value="Equipo B")
+        xg_v = st.number_input("xG (Goles Esperados) ", value=1.1, step=0.1)
+        forma_v = st.slider("Forma (0-100%)", 0, 100, 50, key="fv")
+        bajas_v = st.multiselect("Bajas Visitantes", ["Portero Titular", "Defensa Central", "Goleador", "Mediocentro Creativo"])
 
-if boton:
-    # --- 1. LÓGICA DE IA (ANÁLISIS DE TEXTO SIMULADO) ---
-    # Evaluamos el impacto de las noticias en la probabilidad
-    impacto_ia = 0.0
-    texto = noticias.lower()
+    with col3:
+        st.subheader("🧠 Contexto e IA")
+        importancia = st.select_slider("Importancia del Partido", options=["Baja", "Media", "Alta", "Crítica"])
+        clima = st.selectbox("Clima", ["Despejado", "Lluvia", "Calor Extremo", "Nieve"])
+        motivacion = st.radio("Motivación Extra", ["Ninguna", "Clásico/Derbi", "Pelea Descenso", "Pelea Título"])
+
+    boton_pro = st.form_submit_button("Ejecutar Análisis de Valor")
+
+if boton_pro:
+    # --- PROCESAMIENTO DE IA (PONDERACIÓN DE VARIABLES) ---
+    # Calculamos penalizaciones por bajas
+    penalizacion_l = len(bajas_l) * 0.08
+    penalizacion_v = len(bajas_v) * 0.08
     
-    # Factores negativos
-    if any(word in texto for word in ["baja", "lesion", "suspendido", "cansancio"]):
-        impacto_ia -= 0.15
-    # Factores positivos
-    if any(word in texto for word in ["titular", "completo", "favorito", "racha"]):
-        impacto_ia += 0.10
-    # Factor clima
-    if "lluvia" in texto or "tormenta" in texto:
-        impacto_ia -= 0.05 # Generalmente beneficia al underdog o reduce goles
-
-    # --- 2. LÓGICA DE MACHINE LEARNING (OPCIÓN 3) ---
-    # Como no hay base de datos, generamos un modelo sintético basado en xG + Impacto IA
-    # Esto simula cómo un modelo de ML procesaría los pesos
+    # Ajuste por forma y motivación (Simulando lógica de ML)
+    ajuste_forma = (forma_l - forma_v) / 200 # Max +/- 0.5
     
-    def simulador_ml(xl, xv, ia):
-        # Base matemática (Poisson simplificado)
-        base = xl / (xl + xv) if (xl + xv) > 0 else 0.5
-        # Ajuste con el contexto de la IA
-        resultado_final = base + ia
-        return np.clip(resultado_final, 0.05, 0.95) # Limitamos entre 5% y 95%
+    # Impacto del clima (La lluvia suele reducir la brecha técnica)
+    ajuste_clima = -0.05 if clima == "Lluvia" and xg_l > xg_v else 0
+    
+    # --- CÁLCULO DE PROBABILIDAD (MODELO HÍBRIDO) ---
+    base_stats = (xg_l - penalizacion_l) / ((xg_l - penalizacion_l) + (xg_v - penalizacion_v))
+    prob_final = base_stats + ajuste_forma + ajuste_clima
+    
+    if motivacion == "Clásico/Derbi":
+        prob_final = (prob_final + 0.5) / 2 # Tiende al equilibrio (50/50)
 
-    probabilidad = simulador_ml(xg_l, xg_v, impacto_ia)
+    prob_final = np.clip(prob_final, 0.01, 0.99)
 
-    # --- 3. RESULTADOS ---
+    # --- DESPLIEGUE DE RESULTADOS ---
     st.divider()
-    st.subheader(f"Resultado del Análisis: {local} vs {visitante}")
+    c1, c2, c3 = st.columns(3)
     
-    m1, m2 = st.columns(2)
-    m1.metric("Probabilidad Victoria Local", f"{probabilidad*100:.1f}%")
-    m2.metric("Ajuste por Contexto (IA)", f"{impacto_ia:+.2f}")
+    with c1:
+        st.metric("Prob. Victoria Local", f"{prob_final*100:.1f}%")
+    with c2:
+        st.metric("Prob. Empate/Visita", f"{(1-prob_final)*100:.1f}%")
+    with c3:
+        # Cálculo de cuota justa (Fair Odds)
+        cuota_justa = 1 / prob_final if prob_final > 0 else 0
+        st.metric("Cuota Justa Sugerida", f"{cuota_justa:.2f}")
 
-    # Visualización
-    st.progress(probabilidad)
-    
-    if probabilidad > 0.65:
-        st.success(f"🔥 **Alta probabilidad:** El análisis sugiere una ventaja clara para {local}.")
-    elif probabilidad < 0.35:
-        st.info(f"🚩 **Oportunidad:** El contexto favorece a {visitante} o un posible empate.")
+    # Mensaje Inteligente
+    if prob_final > 0.70:
+        st.success(f"✅ FUERTE: {local} llega con métricas dominantes.")
+    elif prob_final < 0.40:
+        st.warning(f"⚠️ ALERTA: {visitante} tiene valor estadístico o el contexto le favorece.")
     else:
-        st.warning("⚖️ **Partido Equilibrado:** Los datos técnicos y de contexto no muestran un favorito claro.")
+        st.info("⚖️ EQUILIBRIO: Las variables sugieren un partido cerrado.")
 
-    st.caption("Nota: Este análisis es estadístico y no garantiza resultados. Juega con responsabilidad.")
+    st.progress(prob_final)
