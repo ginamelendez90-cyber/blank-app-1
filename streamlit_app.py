@@ -1,113 +1,95 @@
 import streamlit as st
-import pytesseract
-from PIL import Image
-import shutil
 import re
+import numpy as np
+from scipy.stats import poisson
 
-# --- MOTOR OCR ---
-t_path = shutil.which("tesseract")
-if t_path:
-    pytesseract.pytesseract.tesseract_cmd = t_path
+st.set_page_config(page_title="Radar de Valor Ultra", layout="wide")
 
-st.set_page_config(page_title="Radar Pro: Value Betting", layout="wide")
+# --- LÓGICA MATEMÁTICA MEJORADA ---
 
-# --- LÓGICA DE ESTADO ---
+def calcular_poisson(lambda_local, lambda_visita):
+    """Calcula probabilidades de victoria y goles usando Poisson."""
+    max_goles = 6
+    prob_matrix = np.outer(poisson.pmf(range(max_goles), lambda_local), 
+                           poisson.pmf(range(max_goles), lambda_visita))
+    
+    empate = np.sum(np.diag(prob_matrix))
+    gana_local = np.sum(np.tril(prob_matrix, -1))
+    prob_1x = (gana_local + empate) * 100
+    return round(prob_1x, 2)
+
+def aplicar_ajustes(prob_base, nivel_rival, peso_recencia=1.1):
+    """Aplica Time Decay (Recencia) y Strength of Schedule (SOS)."""
+    # Time Decay: Multiplicador por inercia de resultados recientes
+    prob_temp = prob_base * peso_recencia
+    # SOS: Ajuste según dificultad del oponente
+    prob_final = prob_temp * nivel_rival
+    return round(min(prob_final, 99.9), 2)
+
+# --- GESTIÓN DE BORRADO ---
 if 'contador' not in st.session_state:
     st.session_state.contador = 0
 
 def borrar_todo():
     st.session_state.contador += 1
 
-def extraer_datos(texto):
-    def buscar(patron):
-        m = re.search(patron, texto, re.IGNORECASE)
-        return m.groups() if m else None
-
-    return {
-        "ganar_empate": buscar(r"(\d+)\s*\((\d+)%\)\s*Empató o Ganó"),
-        "btts": buscar(r"(\d+)\s*\((\d+)%\)\s*Ambos equipos marcaron"),
-        "over25": buscar(r"(\d+)\s*\((\d+)%\)\s*Más de 2\.5 goles"),
-        "goles_c": buscar(r"(\d+\.\d+)\s*Goles convertidos\s*(\d+\.\d+)"),
-        "remates_arco": buscar(r"(\d+\.\d+)\s*Remates al arco\s*(\d+\.\d+)"),
-    }
-
-def identificar_cuotas(texto):
-    # Busca números decimales (cuotas)
-    nums = re.findall(r"\d+\.\d+", texto)
-    # Intenta mapear por orden común: Local (0), Empate (1), Visita (2) o Over/Under
-    cuotas = {}
-    if len(nums) >= 3:
-        cuotas['1X2'] = [float(nums[0]), float(nums[1]), float(nums[2])]
-    if len(nums) >= 2:
-        cuotas['O/U'] = [float(n) for n in nums[-2:]]
-    return cuotas
-
 # --- INTERFAZ ---
-st.title("⚽ Radar de Valor: Análisis de Cuotas")
+st.title("⚽ Radar de Valor: Inteligencia Predictiva")
 
-col_left, col_right = st.columns(2)
+st.sidebar.header("🛡️ Parámetros SOS")
+sos_factor = st.sidebar.select_slider(
+    "Nivel del Rival Próximo:",
+    options=[0.8, 0.9, 1.0, 1.1, 1.2],
+    value=1.0,
+    help="0.8: Rival muy fuerte | 1.2: Rival muy débil"
+)
 
-with col_left:
-    st.subheader("📋 Estadísticas (365Scores)")
+col_a, col_b = st.columns(2)
+with col_a:
+    st.subheader("📋 Estadísticas 365")
     txt_stats = st.text_area("Pega datos aquí:", height=150, key=f"s_{st.session_state.contador}")
+with col_b:
+    st.subheader("💰 Cuotas")
+    txt_odds = st.text_area("Pega cuotas:", height=150, key=f"o_{st.session_state.contador}")
 
-with col_right:
-    st.subheader("💰 Cuotas Detectadas")
-    txt_odds = st.text_area("Pega cuotas aquí (ej: 1.80 3.40 4.20):", height=150, key=f"o_{st.session_state.contador}")
-
-if st.button("🗑️ Borrar y Siguiente Partido", use_container_width=True):
+if st.button("🗑️ Borrar Todo", use_container_width=True):
     borrar_todo()
     st.rerun()
 
-# --- CÁLCULO DE VALOR ---
+# --- PROCESAMIENTO AVANZADO ---
 if txt_stats:
-    d = extraer_datos(txt_stats)
-    odds = identificar_cuotas(txt_odds)
+    # Extracción de promedios de goles
+    goles = re.findall(r"(\d+\.\d+)\s*Goles convertidos\s*(\d+\.\d+)", txt_stats)
+    datos_mkt = re.search(r"(\d+)\s*\((\d+)%\)\s*Empató o Ganó", txt_stats)
     
-    st.divider()
-    st.subheader("📊 Comparativa de Valor (Value Betting)")
-    
-    # 1. Análisis de Doble Oportunidad Local (1X)
-    if d["ganar_empate"] and '1X2' in odds:
-        prob_est = int(d["ganar_empate"][1])
-        # Aproximación de cuota 1X basada en Local y Empate
-        c_l, c_e = odds['1X2'][0], odds['1X2'][1]
-        cuota_1x = 1 / ((1/c_l) + (1/c_e))
-        prob_mkt = (1 / cuota_1x) * 100
-        valor = prob_est - prob_mkt
+    if goles and datos_mkt:
+        l_local, l_visita = float(goles[0][0]), float(goles[0][1])
+        prob_estatica = int(datos_mkt[1])
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("1X Real (Est.)", f"{prob_est}%")
-        c2.metric("1X Mercado (Odds)", f"{round(prob_mkt, 1)}%")
+        # 1. Cálculo Poisson (Probabilidad Matemática Pura)
+        prob_poisson = calcular_poisson(l_local, l_visita)
         
-        if valor > 5:
-            c3.metric("VALOR", f"+{round(valor, 1)}%", delta="APOSTAR", delta_color="normal")
-            st.success(f"🎯 Value Bet en Doble Oportunidad: Cuota estimada {round(cuota_1x, 2)}")
-        else:
-            c3.metric("VALOR", f"{round(valor, 1)}%", delta="SIN VALOR", delta_color="inverse")
-
-    # 2. Análisis de Over 2.5
-    if d["over25"] and 'O/U' in odds:
+        # 2. Aplicación de SOS y Recencia
+        prob_final = aplicar_ajustes(prob_poisson, sos_factor)
+        
         st.divider()
-        prob_over = int(d["over25"][1])
-        cuota_over = odds['O/U'][0]
-        prob_mkt_o = (1 / cuota_over) * 100
-        val_o = prob_over - prob_mkt_o
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Prob. Poisson (Goles)", f"{prob_poisson}%")
+        c2.metric("Prob. Real Ajustada", f"{prob_final}%", 
+                  delta=f"{round(prob_final - prob_estatica, 1)}% vs 365")
         
-        o1, o2, o3 = st.columns(3)
-        o1.metric("Over 2.5 (Est.)", f"{prob_over}%")
-        o2.metric("Over 2.5 (Odds)", f"{round(prob_mkt_o, 1)}%")
-        
-        if val_o > 5:
-            o3.metric("VALOR", f"+{round(val_o, 1)}%", delta="VALOR")
-        else:
-            o3.metric("VALOR", f"{round(val_o, 1)}%", delta="BAJO")
+        # 3. Identificación de Valor (Odds)
+        odds = re.findall(r"\d+\.\d+", txt_odds)
+        if odds:
+            cuota_mkt = float(odds[0])
+            prob_mkt = (1/cuota_mkt) * 100
+            edge = prob_final - prob_mkt
+            
+            c3.metric("Edge (Ventaja)", f"{round(edge, 1)}%", 
+                      delta="VALOR" if edge > 5 else "BAJO")
+            
+            if edge > 5:
+                st.success(f"🎯 VALUE BET: Tu modelo indica un {prob_final}% contra un {round(prob_mkt, 1)}% de la casa.")
 
-    # Mostrar métricas de eficiencia que ya teníamos
     st.divider()
-    if d["goles_c"] and d["remates_arco"]:
-        ef = round(float(d["remates_arco"][1]) / float(d["goles_c"][1]), 2)
-        st.info(f"⚡ Letalidad del Visitante: {ef} remates al arco por gol.")
-
-else:
-    st.info("Introduce estadísticas para calcular el valor frente a las cuotas.")
+    st.info("💡 El cálculo ahora utiliza Distribución de Poisson para proyectar resultados basados en la media de goles.")
