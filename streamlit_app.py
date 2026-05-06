@@ -2,94 +2,102 @@ import streamlit as st
 import re
 import numpy as np
 from scipy.stats import poisson
+import pytesseract
+from PIL import Image
+import shutil
 
-st.set_page_config(page_title="Radar de Valor Ultra", layout="wide")
+# --- MOTOR OCR ---
+t_path = shutil.which("tesseract")
+if t_path:
+    pytesseract.pytesseract.tesseract_cmd = t_path
 
-# --- LÓGICA MATEMÁTICA MEJORADA ---
+st.set_page_config(page_title="Radar de Valor: Veredicto Final", layout="wide")
 
-def calcular_poisson(lambda_local, lambda_visita):
-    """Calcula probabilidades de victoria y goles usando Poisson."""
-    max_goles = 6
-    prob_matrix = np.outer(poisson.pmf(range(max_goles), lambda_local), 
-                           poisson.pmf(range(max_goles), lambda_visita))
-    
+# --- FUNCIONES DE CÁLCULO ---
+
+def calcular_poisson(l_local, l_visita):
+    max_goles = 7
+    prob_matrix = np.outer(poisson.pmf(range(max_goles), l_local), 
+                           poisson.pmf(range(max_goles), l_visita))
     empate = np.sum(np.diag(prob_matrix))
     gana_local = np.sum(np.tril(prob_matrix, -1))
-    prob_1x = (gana_local + empate) * 100
-    return round(prob_1x, 2)
+    return (gana_local + empate) * 100
 
-def aplicar_ajustes(prob_base, nivel_rival, peso_recencia=1.1):
-    """Aplica Time Decay (Recencia) y Strength of Schedule (SOS)."""
-    # Time Decay: Multiplicador por inercia de resultados recientes
-    prob_temp = prob_base * peso_recencia
-    # SOS: Ajuste según dificultad del oponente
-    prob_final = prob_temp * nivel_rival
-    return round(min(prob_final, 99.9), 2)
+def ajustar(prob, sos, recencia=1.1):
+    return round(min((prob * recencia) * sos, 99.0), 2)
 
-# --- GESTIÓN DE BORRADO ---
+# --- ESTADO DE BORRADO ---
 if 'contador' not in st.session_state:
     st.session_state.contador = 0
 
-def borrar_todo():
+def borrar():
     st.session_state.contador += 1
 
 # --- INTERFAZ ---
-st.title("⚽ Radar de Valor: Inteligencia Predictiva")
+st.title("⚽ Veredicto Final: Radar de Valor")
 
-st.sidebar.header("🛡️ Parámetros SOS")
-sos_factor = st.sidebar.select_slider(
-    "Nivel del Rival Próximo:",
-    options=[0.8, 0.9, 1.0, 1.1, 1.2],
-    value=1.0,
-    help="0.8: Rival muy fuerte | 1.2: Rival muy débil"
-)
+st.sidebar.header("🛡️ Ajuste SOS")
+sos = st.sidebar.select_slider("Rival de hoy:", options=[0.8, 0.9, 1.0, 1.1, 1.2], value=1.0)
 
 col_a, col_b = st.columns(2)
 with col_a:
-    st.subheader("📋 Estadísticas 365")
-    txt_stats = st.text_area("Pega datos aquí:", height=150, key=f"s_{st.session_state.contador}")
+    txt_stats = st.text_area("Datos 365Scores:", height=150, key=f"s_{st.session_state.contador}")
 with col_b:
-    st.subheader("💰 Cuotas")
-    txt_odds = st.text_area("Pega cuotas:", height=150, key=f"o_{st.session_state.contador}")
+    txt_odds = st.text_area("Cuotas (1.80 3.50...):", height=150, key=f"o_{st.session_state.contador}")
 
-if st.button("🗑️ Borrar Todo", use_container_width=True):
-    borrar_todo()
+if st.button("🗑️ Borrar y Siguiente", use_container_width=True):
+    borrar()
     st.rerun()
 
-# --- PROCESAMIENTO AVANZADO ---
+# --- MOTOR DE DECISIÓN ---
 if txt_stats:
-    # Extracción de promedios de goles
+    # Extracción
     goles = re.findall(r"(\d+\.\d+)\s*Goles convertidos\s*(\d+\.\d+)", txt_stats)
     datos_mkt = re.search(r"(\d+)\s*\((\d+)%\)\s*Empató o Ganó", txt_stats)
-    
+    odds = re.findall(r"\d+\.\d+", txt_odds)
+
     if goles and datos_mkt:
-        l_local, l_visita = float(goles[0][0]), float(goles[0][1])
-        prob_estatica = int(datos_mkt[1])
+        l_loc, l_vis = float(goles[0][0]), float(goles[0][1])
+        prob_base = int(datos_mkt[1])
         
-        # 1. Cálculo Poisson (Probabilidad Matemática Pura)
-        prob_poisson = calcular_poisson(l_local, l_visita)
-        
-        # 2. Aplicación de SOS y Recencia
-        prob_final = aplicar_ajustes(prob_poisson, sos_factor)
+        # Cálculos Pro
+        p_poisson = calcular_poisson(l_loc, l_vis)
+        p_real = ajustar(p_poisson, sos)
         
         st.divider()
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Prob. Poisson (Goles)", f"{prob_poisson}%")
-        c2.metric("Prob. Real Ajustada", f"{prob_final}%", 
-                  delta=f"{round(prob_final - prob_estatica, 1)}% vs 365")
         
-        # 3. Identificación de Valor (Odds)
-        odds = re.findall(r"\d+\.\d+", txt_odds)
+        # --- SECCIÓN DEL VEREDICTO ---
+        st.subheader("🏁 Veredicto del Algoritmo")
+        
         if odds:
-            cuota_mkt = float(odds[0])
-            prob_mkt = (1/cuota_mkt) * 100
-            edge = prob_final - prob_mkt
+            cuota = float(odds[0])
+            prob_mkt = (1/cuota) * 100
+            edge = p_real - prob_mkt
             
-            c3.metric("Edge (Ventaja)", f"{round(edge, 1)}%", 
-                      delta="VALOR" if edge > 5 else "BAJO")
-            
-            if edge > 5:
-                st.success(f"🎯 VALUE BET: Tu modelo indica un {prob_final}% contra un {round(prob_mkt, 1)}% de la casa.")
+            # Lógica de veredicto
+            if edge > 7:
+                st.success(f"✅ **APUESTA RECOMENDADA:** Doble Oportunidad 1X")
+                st.info(f"**Razón:** Ventaja masiva del {round(edge, 1)}% sobre la casa. La cuota de {cuota} paga demasiado para el riesgo real.")
+            elif edge > 3:
+                st.warning(f"🟡 **OPCIÓN SECUNDARIA:** 1X (Valor ajustado)")
+                st.write("Hay ventaja, pero el margen es estrecho. Solo entrar si la alineación confirma titulares.")
+            else:
+                st.error(f"❌ **NO APOSTAR:** No hay valor en la cuota")
+                st.write(f"La probabilidad de la casa ({round(prob_mkt, 1)}%) es muy similar o mayor a la nuestra ({p_real}%).")
+        else:
+            st.info("Pega las cuotas para recibir el veredicto final.")
 
-    st.divider()
-    st.info("💡 El cálculo ahora utiliza Distribución de Poisson para proyectar resultados basados en la media de goles.")
+        # --- DETALLES TÉCNICOS ---
+        st.divider()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Prob. Poisson", f"{round(p_poisson,1)}%")
+        c2.metric("Prob. Real (SOS)", f"{p_real}%")
+        if odds:
+            c3.metric("Edge (Ventaja)", f"{round(p_real - (1/float(odds[0]))*100, 1)}%")
+
+    # Corners y Letalidad (Rápido)
+    corners = re.findall(r"(\d+\.\d+)\s*Corners\s*(\d+\.\d+)", txt_stats)
+    if corners:
+        st.caption(f"🚩 Proyección de Corners: {float(corners[0][0]) + float(corners[0][1])}")
+else:
+    st.info("Esperando datos para dar el veredicto...")
