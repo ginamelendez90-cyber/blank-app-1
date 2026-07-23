@@ -105,7 +105,7 @@ def calcular_valor(df_mercado):
 # ==========================================
 if __name__ == "__main__":
     # Reemplaza con la URL real y ajusta las clases CSS en la función extraer_datos_mercado
-    URL_OBJETIVO = "https://ejemplo-casa-de-apuestas.com/futbol"
+    URL_OBJETIVO = "https://www.sportmonks.com/football"
     
     # Ejecutar flujo
     df_crudo = extraer_datos_mercado(URL_OBJETIVO)
