@@ -20,9 +20,14 @@ with tab_cliente:
 
     if st.button("Consultar"):
         if codigo_cliente:
-            df = conn.read(ttl=0) # Lee los datos frescos sin caché
-            df['Codigo'] = df['Codigo'].astype(str)
-            resultado = df[df['Codigo'] == str(codigo_cliente)]
+            # Leemos los datos forzando las columnas exactas para evitar errores de nombres
+            df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
+            
+            # Limpiamos espacios y convertimos a texto el código para buscar sin fallos
+            df['Codigo'] = df['Codigo'].astype(str).str.strip()
+            codigo_buscado = str(codigo_cliente).strip()
+            
+            resultado = df[df['Codigo'] == codigo_buscado]
             
             if not resultado.empty:
                 st.success("¡Datos encontrados!")
@@ -73,13 +78,13 @@ with tab_admin:
             
             if boton_guardar:
                 if nuevo_codigo and nuevo_nombre and nuevo_concepto:
-                    # 1. Leemos los datos actuales
-                    df_actual = conn.read(ttl=0)
+                    # 1. Leemos los datos actuales asegurando las columnas
+                    df_actual = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
                     
                     # 2. Creamos la nueva fila
                     nuevo_registro = pd.DataFrame([{
                         "Fecha": nueva_fecha.strftime("%Y-%m-%d"),
-                        "Codigo": nuevo_codigo,
+                        "Codigo": str(nuevo_codigo).strip(),
                         "Nombre": nuevo_nombre,
                         "Concepto": nuevo_concepto,
                         "Cargo": float(nuevo_cargo),
@@ -89,7 +94,7 @@ with tab_admin:
                     # 3. Concatenamos
                     df_actualizado = pd.concat([df_actual, nuevo_registro], ignore_index=True)
                     
-                    # 4. Actualizamos Google Sheets usando la API de servicio autorizada
+                    # 4. Actualizamos Google Sheets
                     conn.update(data=df_actualizado)
                     
                     st.success(f"✅ ¡Movimiento registrado exitosamente para {nuevo_nombre}!")
