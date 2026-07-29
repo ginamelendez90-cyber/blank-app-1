@@ -406,7 +406,7 @@ with tab_admin:
                         cargos_ciclo = movs_ciclo['Cargo'].sum()
                         abonos_ciclo = movs_ciclo['Abono'].sum()
                         
-                        # AQUÍ ESTÁ LA CORRECCIÓN: Evita valores negativos por redondeos o excesos de pagos
+                        # Saldo pendiente real protegido contra negativos
                         saldo_actual_cli = max(0.0, cargos_ciclo - abonos_ciclo)
                         
                         lista_resumen_clientes.append({
@@ -419,7 +419,7 @@ with tab_admin:
                     
                     resumen_clientes = pd.DataFrame(lista_resumen_clientes)
                     
-                    # Suma de la calle protegida con max(0.0, ...)
+                    # Suma de la calle protegida
                     saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
                     
                     total_abonos_general = df_existente['Abono'].sum()
@@ -452,6 +452,7 @@ with tab_admin:
                     
                     st.divider()
                     st.subheader("Estado de Cuenta de Clientes")
+                    # Corrección en el orden y nombres de columnas de visualización del DataFrame
                     st.dataframe(resumen_clientes[['Codigo', 'Nombre', 'Total_Cargos', 'Total_Abonos', 'Saldo_Pendiente']], use_container_width=True, hide_index=True)
                 else:
                     st.info("Aún no hay registros.")
