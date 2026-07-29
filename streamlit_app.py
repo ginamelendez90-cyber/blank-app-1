@@ -52,7 +52,9 @@ with tab_cliente:
                 
                 prestamo_actual = movimientos_ciclo_actual['Cargo'].sum()
                 pagos_actual = movimientos_ciclo_actual['Abono'].sum()
-                saldo_pendiente = prestamo_actual - pagos_actual
+                
+                # Forzar a que el saldo no baje de 0
+                saldo_pendiente = max(0.0, prestamo_actual - pagos_actual)
 
                 st.subheader(f"Cliente: {nombre}")
                 
@@ -390,7 +392,6 @@ with tab_admin:
                 if not df_existente.empty:
                     df_clientes = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)]
                     
-                    # Cálculo correcto y robusto por cliente para aislar ciclos activos
                     lista_resumen_clientes = []
                     for codigo_cliente_val, grupo_c in df_clientes.groupby('Codigo'):
                         nombre_c = grupo_c.iloc[0]['Nombre']
@@ -404,19 +405,21 @@ with tab_admin:
                             
                         cargos_ciclo = movs_ciclo['Cargo'].sum()
                         abonos_ciclo = movs_ciclo['Abono'].sum()
-                        saldo_actual_cli = cargos_ciclo - abonos_ciclo
+                        
+                        # AQUÍ ESTÁ LA CORRECCIÓN: Evita valores negativos por redondeos o excesos de pagos
+                        saldo_actual_cli = max(0.0, cargos_ciclo - abonos_ciclo)
                         
                         lista_resumen_clientes.append({
                             'Codigo': codigo_cliente_val,
                             'Nombre': nombre_c,
                             'Total_Cargos': cargos_ciclo,
                             'Total_Abonos': abonos_ciclo,
-                            'Saldo_Pendiente': max(0.0, saldo_actual_cli) # Evita negativos por redondeos
+                            'Saldo_Pendiente': saldo_actual_cli
                         })
                     
                     resumen_clientes = pd.DataFrame(lista_resumen_clientes)
                     
-                    # Dinero en la calle = suma de saldos pendientes de los ciclos activos mayores a cero
+                    # Suma de la calle protegida con max(0.0, ...)
                     saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
                     
                     total_abonos_general = df_existente['Abono'].sum()
