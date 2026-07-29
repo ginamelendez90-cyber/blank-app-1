@@ -109,13 +109,22 @@ with tab_admin:
             df_existente = pd.DataFrame()
 
         # ------------------------------------------
-        # 1. REGISTRAR MOVIMIENTOS (Cobros / Préstamos con Cuenta)
+        # 1. REGISTRAR MOVIMIENTOS (Con opción de dividir cuentas)
         # ------------------------------------------
         if seccion_admin == "Registrar Movimientos":
             st.subheader("Registrar Cobro (Abono) o Préstamo")
             
             tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
-            cuenta_destino = st.selectbox("¿En qué cuenta entra o sale el dinero?", ["Efectivo", "Pago Móvil", "Binance"])
+            
+            # Opción para usar cuentas múltiples simultáneamente
+            usar_dos_cuentas = st.checkbox("🔀 ¿El dinero sale/entra combinando DOS cuentas al mismo tiempo? (Ej: Efectivo + Binance)")
+            
+            if not usar_dos_cuentas:
+                if tipo_movimiento == "Registrar Abono / Pago":
+                    cuenta_afectada = st.selectbox("¿A qué cuenta ingresa el pago?", ["Efectivo", "Pago Móvil", "Binance"])
+                else:
+                    cuenta_afectada = st.selectbox("¿De qué cuenta sale el dinero para este préstamo?", ["Efectivo", "Pago Móvil", "Binance"])
+            
             es_nuevo_cliente = st.checkbox("➕ Registrar como cliente NUEVO")
             
             if not es_nuevo_cliente and opciones_clientes:
@@ -130,16 +139,22 @@ with tab_admin:
             with st.form("formulario_registro"):
                 nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
                 
-                if tipo_movimiento == "Registrar Abono / Pago":
-                    nuevo_concepto = st.text_input("Concepto", value=f"Abono a cuenta ({cuenta_destino})")
-                    monto = st.number_input("Monto del Abono ($)", min_value=0.0, value=0.0)
-                    cargo_val = 0.0
-                    abono_val = float(monto)
+                if usar_dos_cuentas:
+                    st.markdown("##### Distribución del monto entre 2 cuentas:")
+                    c_1 = st.selectbox("Primera Cuenta", ["Efectivo", "Pago Móvil", "Binance"], key="c1")
+                    monto_c1 = st.number_input(f"Monto correspondiente a {c_1} ($)", min_value=0.0, value=0.0, key="mc1")
+                    
+                    # Filtramos la segunda cuenta para que no sea la misma
+                    otras_cuentas = [c for c in ["Efectivo", "Pago Móvil", "Binance"] if c != c_1]
+                    c_2 = st.selectbox("Segunda Cuenta", otras_cuentas, key="c2")
+                    monto_c2 = st.number_input(f"Monto correspondiente a {c_2} ($)", min_value=0.0, value=0.0, key="mc2")
+                    
+                    monto_total_calculado = monto_c1 + monto_c2
+                    st.info(f"💵 Monto Total del Movimiento: **${monto_total_calculado:,.2f}**")
                 else:
-                    nuevo_concepto = st.text_input("Concepto", value=f"Préstamo inicial / Deuda ({cuenta_destino})")
-                    monto = st.number_input("Monto del Préstamo/Deuda ($)", min_value=0.0, value=0.0)
-                    cargo_val = float(monto)
-                    abono_val = 0.0
+                    monto = st.number_input("Monto ($)", min_value=0.0, value=0.0)
+                
+                concepto_personalizado = st.text_input("Concepto / Nota adicional (Opcional)", value="")
                 
                 boton_guardar = st.form_submit_button("Guardar en el Sistema")
                 
@@ -154,17 +169,41 @@ with tab_admin:
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
-                            fila_nueva = [
-                                nueva_fecha.strftime("%Y-%m-%d"),
-                                str(nuevo_codigo).strip(),
-                                nuevo_nombre,
-                                nuevo_concepto,
-                                cargo_val,
-                                abono_val
-                            ]
+                            filas_a_agregar = []
                             
-                            sheet.append_row(fila_nueva)
-                            st.success(f"✅ ¡Movimiento registrado en {cuenta_destino} exitosamente!")
+                            if usar_dos_cuentas:
+                                if monto_total_calculado <= 0:
+                                    st.error("⚠️ Los montos combinados deben ser mayores a 0.")
+                                    st.stop()
+                                    
+                                desc_base = concepto_personalizado if concepto_personalizado else ("Préstamo inicial" if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else "Abono a cuenta")
+                                
+                                if tipo_movimiento == "Registrar Abono / Pago":
+                                    if monto_c1 > 0:
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} ({c_1})", 0.0, float(monto_c1)])
+                                    if monto_c2 > 0:
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} ({c_2})", 0.0, float(monto_c2)])
+                                else:
+                                    if monto_c1 > 0:
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_1})", float(monto_c1), 0.0])
+                                    if monto_c2 > 0:
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_2})", float(monto_c2), 0.0])
+                            else:
+                                if monto <= 0:
+                                    st.error("⚠️ Ingresa un monto válido mayor a 0.")
+                                    st.stop()
+                                    
+                                desc_default = concepto_personalizado if concepto_personalizado else (f"Préstamo inicial (Salida de {cuenta_afectada})" if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else f"Abono a cuenta ({cuenta_afectada})")
+                                
+                                if tipo_movimiento == "Registrar Abono / Pago":
+                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, 0.0, float(monto)])
+                                else:
+                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, float(monto), 0.0])
+                            
+                            for fila in filas_a_agregar:
+                                sheet.append_row(fila)
+                                
+                            st.success(f"✅ ¡Movimiento registrado correctamente para {nuevo_nombre}!")
                         except Exception as e:
                             st.error(f"Error al guardar: {e}")
                     else:
@@ -175,7 +214,6 @@ with tab_admin:
         # ------------------------------------------
         elif seccion_admin == "Transferir entre Cuentas":
             st.subheader("Mover Dinero entre Efectivo, Pago Móvil y Binance")
-            st.write("Registra cuando pasas fondos de una cuenta a otra (Ej: Cambiar Efectivo a Binance o viceversa).")
             
             with st.form("form_transferencia"):
                 fecha_trans = st.date_input("Fecha de transferencia", datetime.now())
@@ -200,11 +238,6 @@ with tab_admin:
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
-                            # Registramos la salida (Cargo simulado o registro especial) y la entrada usando un código especial 'CAJA'
-                            fila_salida = [fecha_trans.strftime("%Y-%m-%d"), "TRANSFERENCIA", "Movimiento Interno", f"Salida hacia {cuenta_destino} (desde {cuenta_origen})", float(monto_trans) if cuenta_origen=="Efectivo" else 0, 0] # Usaremos conceptos inteligentes
-                            # Para simplificar el flujo contable, guardaremos la transferencia con códigos especiales de control interno
-                            
-                            # Guardamos una fila de salida y una de entrada
                             fila_mov_1 = [fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_origen.upper()}", f"Sistema ({cuenta_origen})", f"Transferencia enviada a {cuenta_destino}", float(monto_trans), 0.0]
                             fila_mov_2 = [fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_destino.upper()}", f"Sistema ({cuenta_destino})", f"Transferencia recibida de {cuenta_origen}", 0.0, float(monto_trans)]
                             
@@ -220,12 +253,11 @@ with tab_admin:
         # ------------------------------------------
         elif seccion_admin == "Registrar Gasto":
             st.subheader("Registrar Salida de Dinero / Gasto")
-            st.write("Controla en qué se va el dinero del negocio (alquiler, comida, servicios, etc.).")
             
             with st.form("form_gasto"):
                 fecha_gasto = st.date_input("Fecha del gasto", datetime.now())
                 cuenta_gasto = st.selectbox("Cuenta de donde se paga el gasto:", ["Efectivo", "Pago Móvil", "Binance"])
-                desc_gasto = st.text_input("Descripción del Gasto (Ej. Pago de internet, Comida, etc.)")
+                desc_gasto = st.text_input("Descripción del Gasto (Ej. Alquiler, Servicios, etc.)")
                 monto_gasto = st.number_input("Monto del Gasto ($)", min_value=0.0, value=0.0)
                 
                 btn_gasto = st.form_submit_button("Guardar Gasto")
@@ -241,7 +273,6 @@ with tab_admin:
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
-                            # Registramos el gasto como un Cargo en la cuenta correspondiente para que reste liquidez
                             fila_gasto = [
                                 fecha_gasto.strftime("%Y-%m-%d"),
                                 f"GASTO_{cuenta_gasto.upper()}",
@@ -297,14 +328,12 @@ with tab_admin:
                 st.info("No hay clientes registrados.")
 
         # ------------------------------------------
-        # 5. FLUJO DE CAJA Y CUENTAS (Efectivo, PM, Binance, Gastos)
+        # 5. FLUJO DE CAJA Y CUENTAS
         # ------------------------------------------
         else:
             st.subheader("💰 Flujo de Caja y Saldo en Cuentas")
             try:
                 if not df_existente.empty:
-                    # Filtramos clientes y cuentas internas para calcular saldos
-                    # Saldo en la calle (excluyendo cuentas internas y gastos)
                     df_clientes = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_", na=False)]
                     
                     resumen_clientes = df_clientes.groupby(['Codigo', 'Nombre']).agg(
@@ -314,30 +343,36 @@ with tab_admin:
                     resumen_clientes['Saldo_Pendiente'] = resumen_clientes['Total_Cargos'] - resumen_clientes['Total_Abonos']
                     saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
                     
-                    # Cálculo de cuentas y gastos basados en los textos de concepto o códigos especiales
-                    # Para simplificar y hacerlo ultra exacto basado en dónde entró el dinero:
                     total_abonos_general = df_existente['Abono'].sum()
-                    total_cargos_general = df_existente['Cargo'].sum()
                     
-                    # Desglose por cuentas basado en el texto del concepto (ej. si incluye Efectivo, Pago Móvil o Binance)
-                    efectivo_ingresos = df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False)]['Abono'].sum()
-                    pago_movil_ingresos = df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False)]['Abono'].sum()
-                    binance_ingresos = df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False)]['Abono'].sum()
+                    efectivo_total = (
+                        df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False)]['Abono'].sum() - 
+                        df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False)]['Cargo'].sum()
+                    )
                     
-                    # Gastos totales
+                    pago_movil_total = (
+                        df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False)]['Abono'].sum() - 
+                        df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False)]['Cargo'].sum()
+                    )
+                    
+                    binance_total = (
+                        df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False)]['Abono'].sum() - 
+                        df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False)]['Cargo'].sum()
+                    )
+
                     total_gastos = df_existente[df_existente['Codigo'].str.contains("GASTO_", na=False)]['Cargo'].sum()
                     
                     st.markdown("### 🏦 Dinero Disponible en Cuentas")
                     col_c1, col_c2, col_c3 = st.columns(3)
-                    col_c1.metric("💵 Efectivo", f"${efectivo_ingresos:,.2f}")
-                    col_c2.metric("📱 Pago Móvil", f"${pago_movil_ingresos:,.2f}")
-                    col_c3.metric("🪙 Binance", f"${binance_ingresos:,.2f}")
+                    col_c1.metric("💵 Efectivo", f"${efectivo_total:,.2f}")
+                    col_c2.metric("📱 Pago Móvil", f"${pago_movil_total:,.2f}")
+                    col_c3.metric("🪙 Binance", f"${binance_total:,.2f}")
                     
                     st.divider()
                     col_f1, col_f2, col_f3 = st.columns(3)
                     col_f1.metric("📌 Dinero en la Calle", f"${saldo_en_la_calle:,.2f}")
                     col_f2.metric("📉 Total Gastos", f"${total_gastos:,.2f}")
-                    col_f3.metric("💵 Total Recaudado", f"${total_abonos_general:,.2f}")
+                    col_f3.metric("💵 Total Histórico Recaudado", f"${total_abonos_general:,.2f}")
                     
                     st.divider()
                     st.subheader("Estado de Cuenta de Clientes")
