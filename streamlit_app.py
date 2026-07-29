@@ -109,148 +109,144 @@ with tab_admin:
             df_existente = pd.DataFrame()
 
         # ------------------------------------------
-# 1. REGISTRAR MOVIMIENTOS (BLOQUE CORREGIDO)
-# ------------------------------------------
-if seccion_admin == "Registrar Movimientos":
-    st.subheader("Registrar Cobro (Abono) o Préstamo")
-    
-    tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
-    usar_dos_cuentas = st.checkbox("🔀 ¿El dinero sale combinando DOS cuentas al mismo tiempo? (Ej: Efectivo + Binance)")
-    
-    if not usar_dos_cuentas:
-        if tipo_movimiento == "Registrar Abono / Pago":
-            cuenta_afectada = st.selectbox("¿A qué cuenta ingresa el pago?", ["Efectivo", "Pago Móvil", "Binance"])
-        else:
-            cuenta_afectada = st.selectbox("¿De qué cuenta sale el dinero para este préstamo?", ["Efectivo", "Pago Móvil", "Binance"])
-    
-    es_nuevo_cliente = st.checkbox("➕ Registrar como cliente NUEVO")
-    
-    if not es_nuevo_cliente and opciones_clientes:
-        cliente_seleccionado = st.selectbox("Selecciona al Cliente Existente:", opciones_clientes)
-        nuevo_codigo = cliente_seleccionado.split(" - ")[0]
-        nuevo_nombre = cliente_seleccionado.split(" - ")[1]
-    else:
-        st.info("Ingresa los datos del nuevo cliente:")
-        nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-002)")
-        nuevo_nombre = st.text_input("Nombre del Cliente")
-    
-    with st.form("formulario_registro"):
-        nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
-        
-        opcion_interes = "Sin interés / Monto Directo"
-        plazo_dias = 30
-        
-        if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
-            st.markdown("##### ⚙️ Configuración del Préstamo (Interés y Plazo)")
-            opcion_interes = st.radio("Selecciona la tasa de interés:", ["Sin interés / Monto Directo", "15% de Interés", "20% de Interés"], horizontal=True)
-            plazo_dias = st.number_input("Plazo del préstamo (en días):", min_value=1, value=30, step=1)
-        
-        if usar_dos_cuentas:
-            st.markdown("##### Distribución del capital base entre 2 cuentas:")
-            c_1 = st.selectbox("Primera Cuenta", ["Efectivo", "Pago Móvil", "Binance"], key="c1")
-            monto_c1 = st.number_input(f"Capital salido de {c_1} ($)", min_value=0.0, value=0.0, key="mc1")
+        # 1. REGISTRAR MOVIMIENTOS
+        # ------------------------------------------
+        if seccion_admin == "Registrar Movimientos":
+            st.subheader("Registrar Cobro (Abono) o Préstamo")
             
-            otras_cuentas = [c for c in ["Efectivo", "Pago Móvil", "Binance"] if c != c_1]
-            c_2 = st.selectbox("Segunda Cuenta", otras_cuentas, key="c2")
-            monto_c2 = st.number_input(f"Capital salido de {c_2} ($)", min_value=0.0, value=0.0, key="mc2")
+            tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
+            usar_dos_cuentas = st.checkbox("🔀 ¿El dinero sale combinando DOS cuentas al mismo tiempo? (Ej: Efectivo + Binance)")
             
-            capital_base_total = monto_c1 + monto_c2
-            
-            if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
-                if opcion_interes == "15% de Interés":
-                    monto_total_deuda = capital_base_total * 1.15
-                elif opcion_interes == "20% de Interés":
-                    monto_total_deuda = capital_base_total * 1.20
+            if not usar_dos_cuentas:
+                if tipo_movimiento == "Registrar Abono / Pago":
+                    cuenta_afectada = st.selectbox("¿A qué cuenta ingresa el pago?", ["Efectivo", "Pago Móvil", "Binance"])
                 else:
-                    monto_total_deuda = capital_base_total
-                st.info(f"💵 Capital real que sale de caja: ${capital_base_total:,.2f} | Deuda total con interés para el cliente: **${monto_total_deuda:,.2f}**")
-            else:
-                monto_total_deuda = capital_base_total
-        else:
-            monto_base = st.number_input("Monto base del préstamo / pago ($)", min_value=0.0, value=0.0)
+                    cuenta_afectada = st.selectbox("¿De qué cuenta sale el dinero para este préstamo?", ["Efectivo", "Pago Móvil", "Binance"])
             
-            if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
-                if opcion_interes == "15% de Interés":
-                    monto_total_deuda = monto_base * 1.15
-                elif opcion_interes == "20% de Interés":
-                    monto_total_deuda = monto_base * 1.20
-                else:
-                    monto_total_deuda = monto_base
-                capital_base_total = monto_base
-                st.info(f"💡 Sale de caja (Capital): ${monto_base:,.2f} | Deuda Total con interés en la calle: **${monto_total_deuda:,.2f}**")
+            es_nuevo_cliente = st.checkbox("➕ Registrar como cliente NUEVO")
+            
+            if not es_nuevo_cliente and opciones_clientes:
+                cliente_seleccionado = st.selectbox("Selecciona al Cliente Existente:", opciones_clientes)
+                nuevo_codigo = cliente_seleccionado.split(" - ")[0]
+                nuevo_nombre = cliente_seleccionado.split(" - ")[1]
             else:
-                monto_total_deuda = monto_base
-                capital_base_total = monto_base
-        
-        concepto_personalizado = st.text_input("Concepto / Nota adicional (Opcional)", value="")
-        boton_guardar = st.form_submit_button("Guardar en el Sistema")
-        
-        if boton_guardar:
-            if nuevo_codigo and nuevo_nombre:
-                try:
-                    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-                    creds_dict = dict(st.secrets["connections"]["gsheets"])
-                    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-                    client = gspread.authorize(creds)
+                st.info("Ingresa los datos del nuevo cliente:")
+                nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-002)")
+                nuevo_nombre = st.text_input("Nombre del Cliente")
+            
+            with st.form("formulario_registro"):
+                nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
+                
+                opcion_interes = "Sin interés / Monto Directo"
+                plazo_dias = 30
+                
+                if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
+                    st.markdown("##### ⚙️ Configuración del Préstamo (Interés y Plazo)")
+                    opcion_interes = st.radio("Selecciona la tasa de interés:", ["Sin interés / Monto Directo", "15% de Interés", "20% de Interés"], horizontal=True)
+                    plazo_dias = st.number_input("Plazo del préstamo (en días):", min_value=1, value=30, step=1)
+                
+                if usar_dos_cuentas:
+                    st.markdown("##### Distribución del capital base entre 2 cuentas:")
+                    c_1 = st.selectbox("Primera Cuenta", ["Efectivo", "Pago Móvil", "Binance"], key="c1")
+                    monto_c1 = st.number_input(f"Capital salido de {c_1} ($)", min_value=0.0, value=0.0, key="mc1")
                     
-                    spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-                    sheet = client.open_by_url(spreadsheet_url).sheet1
+                    otras_cuentas = [c for c in ["Efectivo", "Pago Móvil", "Binance"] if c != c_1]
+                    c_2 = st.selectbox("Segunda Cuenta", otras_cuentas, key="c2")
+                    monto_c2 = st.number_input(f"Capital salido de {c_2} ($)", min_value=0.0, value=0.0, key="mc2")
                     
-                    filas_a_agregar = []
+                    capital_base_total = monto_c1 + monto_c2
                     
-                    sufijo_prestamo = ""
                     if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
-                        desc_interes_txt = "Sin interés" if opcion_interes == "Sin interés / Monto Directo" else opcion_interes
-                        sufijo_prestamo = f" [Plazo: {plazo_dias} días | {desc_interes_txt}]"
-                    
-                    if tipo_movimiento == "Registrar Abono / Pago":
-                        if usar_dos_cuentas:
-                            if monto_c1 > 0:
-                                filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Abono a cuenta ({c_1})", 0.0, float(monto_c1)])
-                            if monto_c2 > 0:
-                                filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Abono a cuenta ({c_2})", 0.0, float(monto_c2)])
+                        if opcion_interes == "15% de Interés":
+                            monto_total_deuda = capital_base_total * 1.15
+                        elif opcion_interes == "20% de Interés":
+                            monto_total_deuda = capital_base_total * 1.20
                         else:
-                            desc_default = concepto_personalizado if concepto_personalizado else f"Abono a cuenta ({cuenta_afectada})"
-                            filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, 0.0, float(monto_total_deuda)])
+                            monto_total_deuda = capital_base_total
+                        st.info(f"💵 Capital real que sale de caja: ${capital_base_total:,.2f} | Deuda total con interés para el cliente: **${monto_total_deuda:,.2f}**")
+                    else:
+                        monto_total_deuda = capital_base_total
+                else:
+                    monto_base = st.number_input("Monto base del préstamo / pago ($)", min_value=0.0, value=0.0)
                     
-                    else:  # Es Préstamo / Deuda Inicial
-                        if usar_dos_cuentas:
-                            if capital_base_total <= 0:
-                                st.error("⚠️ Los montos del capital base deben ser mayores a 0.")
-                                st.stop()
-                            
-                            # Factor para repartir el total de la deuda proporcionalmente al capital de cada cuenta
-                            factor = monto_total_deuda / capital_base_total
-                            
-                            if monto_c1 > 0:
-                                cargo_c1 = float(monto_c1) * factor
-                                # AQUÍ ESTÁ EL TRUCO: Escribimos explícitamente "Capital: $ [monto]" para que la función de caja sepa cuánto restar exactamente
-                                desc_c1 = f"Préstamo inicial (Salida de {c_1} - Capital: ${float(monto_c1):,.2f}){sufijo_prestamo}"
-                                filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c1, float(cargo_c1), 0.0])
-                            
-                            if monto_c2 > 0:
-                                cargo_c2 = float(monto_c2) * factor
-                                desc_c2 = f"Préstamo inicial (Salida de {c_2} - Capital: ${float(monto_c2):,.2f}){sufijo_prestamo}"
-                                filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c2, float(cargo_c2), 0.0])
+                    if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
+                        if opcion_interes == "15% de Interés":
+                            monto_total_deuda = monto_base * 1.15
+                        elif opcion_interes == "20% de Interés":
+                            monto_total_deuda = monto_base * 1.20
                         else:
-                            if monto_total_deuda <= 0:
-                                st.error("⚠️ Ingresa un monto válido mayor a 0.")
-                                st.stop()
+                            monto_total_deuda = monto_base
+                        capital_base_total = monto_base
+                        st.info(f"💡 Sale de caja (Capital): ${monto_base:,.2f} | Deuda Total con interés en la calle: **${monto_total_deuda:,.2f}**")
+                    else:
+                        monto_total_deuda = monto_base
+                        capital_base_total = monto_base
+                
+                concepto_personalizado = st.text_input("Concepto / Nota adicional (Opcional)", value="")
+                boton_guardar = st.form_submit_button("Guardar en el Sistema")
+                
+                if boton_guardar:
+                    if nuevo_codigo and nuevo_nombre:
+                        try:
+                            scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                            creds_dict = dict(st.secrets["connections"]["gsheets"])
+                            creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+                            client = gspread.authorize(creds)
                             
-                            # AQUÍ ESTÁ EL TRUCO: La columna 'Cargo' lleva el TOTAL con interés (ej. 2400), 
-                            # pero en el concepto dejamos escrito textualmente el CAPITAL EXACTO (ej. 2000)
-                            desc_prestamo = f"Préstamo inicial (Salida de {cuenta_afectada} - Capital: ${float(monto_base):,.2f}){sufijo_prestamo}"
-                            filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_prestamo, float(monto_total_deuda), 0.0])
-                    
-                    for fila in filas_a_agregar:
-                        sheet.append_row(fila)
-                        
-                    st.success(f"✅ ¡Movimiento registrado correctamente para {nuevo_nombre}!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
-            else:
-                st.error("⚠️ Por favor, completa el código y el nombre del cliente.")
+                            spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+                            sheet = client.open_by_url(spreadsheet_url).sheet1
+                            
+                            filas_a_agregar = []
+                            
+                            sufijo_prestamo = ""
+                            if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
+                                desc_interes_txt = "Sin interés" if opcion_interes == "Sin interés / Monto Directo" else opcion_interes
+                                sufijo_prestamo = f" [Plazo: {plazo_dias} días | {desc_interes_txt}]"
+                            
+                            if tipo_movimiento == "Registrar Abono / Pago":
+                                if usar_dos_cuentas:
+                                    if monto_c1 > 0:
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Abono a cuenta ({c_1})", 0.0, float(monto_c1)])
+                                    if monto_c2 > 0:
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Abono a cuenta ({c_2})", 0.0, float(monto_c2)])
+                                else:
+                                    desc_default = concepto_personalizado if concepto_personalizado else f"Abono a cuenta ({cuenta_afectada})"
+                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, 0.0, float(monto_total_deuda)])
+                            
+                            else:  # Es Préstamo / Deuda Inicial
+                                if usar_dos_cuentas:
+                                    if capital_base_total <= 0:
+                                        st.error("⚠️ Los montos del capital base deben ser mayores a 0.")
+                                        st.stop()
+                                    
+                                    factor = monto_total_deuda / capital_base_total
+                                    
+                                    if monto_c1 > 0:
+                                        cargo_c1 = float(monto_c1) * factor
+                                        desc_c1 = f"Préstamo inicial (Salida de {c_1} - Capital: ${float(monto_c1):,.2f}){sufijo_prestamo}"
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c1, float(cargo_c1), 0.0])
+                                    
+                                    if monto_c2 > 0:
+                                        cargo_c2 = float(monto_c2) * factor
+                                        desc_c2 = f"Préstamo inicial (Salida de {c_2} - Capital: ${float(monto_c2):,.2f}){sufijo_prestamo}"
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c2, float(cargo_c2), 0.0])
+                                else:
+                                    if monto_total_deuda <= 0:
+                                        st.error("⚠️ Ingresa un monto válido mayor a 0.")
+                                        st.stop()
+                                    
+                                    desc_prestamo = f"Préstamo inicial (Salida de {cuenta_afectada} - Capital: ${float(monto_base):,.2f}){sufijo_prestamo}"
+                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_prestamo, float(monto_total_deuda), 0.0])
+                            
+                            for fila in filas_a_agregar:
+                                sheet.append_row(fila)
+                                
+                            st.success(f"✅ ¡Movimiento registrado correctamente para {nuevo_nombre}!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
+                    else:
+                        st.error("⚠️ Por favor, completa el código y el nombre del cliente.")
 
         # ------------------------------------------
         # 2. INYECTAR DINERO / ALIMENTAR CAJA
@@ -404,9 +400,6 @@ if seccion_admin == "Registrar Movimientos":
                         
                         total_entradas = ingresos_abonos + ingresos_transf
                         
-                        # CORRECCIÓN DE SALIDAS DE CAJA: 
-                        # Extrae limpiamente el capital base real indicado en el texto del concepto, 
-                        # evitando que tome el monto con intereses que se le cargó al cliente.
                         mask_cuenta = df_existente['Concepto'].str.lower().str.contains(f"salida de {n}", regex=True)
                         if mask_cuenta.any():
                             sub_df = df_existente[mask_cuenta]
@@ -462,5 +455,6 @@ if seccion_admin == "Registrar Movimientos":
             except Exception as e:
                 st.error(f"Error: {e}")
                 
-    elif clave_admin != "":
-        st.error("Contraseña incorrecta.")
+    else:
+        if clave_admin != "":
+            st.error("Contraseña incorrecta.")
