@@ -32,7 +32,6 @@ with tab_cliente:
                 st.success("¡Datos encontrados!")
                 
                 nombre = resultado.iloc[0]['Nombre']
-                
                 total_cargos_historico = resultado['Cargo'].sum()
                 
                 indices_liquidacion = resultado[resultado['Concepto'].str.contains("Crédito anterior liquidado", case=False, na=False)].index
@@ -117,7 +116,7 @@ with tab_admin:
             
             tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
             
-            usar_dos_cuentas = st.checkbox("🔀 ¿El dinero sale/entra combinando DOS cuentas al mismo tiempo? (Ej: Efectivo + Binance)")
+            usar_dos_cuentas = st.checkbox("🔀 ¿El dinero sale combinando DOS cuentas al mismo tiempo? (Ej: Efectivo + Binance)")
             
             if not usar_dos_cuentas:
                 if tipo_movimiento == "Registrar Abono / Pago":
@@ -161,13 +160,11 @@ with tab_admin:
                     if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
                         if opcion_interes == "15% de Interés":
                             monto_total_deuda = capital_base_total * 1.15
-                            st.info(f"💵 Capital Real que sale de caja: ${capital_base_total:,.2f} | Deuda Total con 15%: **${monto_total_deuda:,.2f}** (Plazo: {plazo_dias} días)")
                         elif opcion_interes == "20% de Interés":
                             monto_total_deuda = capital_base_total * 1.20
-                            st.info(f"💵 Capital Real que sale de caja: ${capital_base_total:,.2f} | Deuda Total con 20%: **${monto_total_deuda:,.2f}** (Plazo: {plazo_dias} días)")
                         else:
                             monto_total_deuda = capital_base_total
-                            st.info(f"💵 Capital / Monto Total: **${monto_total_deuda:,.2f}** (Plazo: {plazo_dias} días)")
+                        st.info(f"💵 Capital real que sale de caja: ${capital_base_total:,.2f} | Deuda total con interés para el cliente: **${monto_total_deuda:,.2f}** (Plazo: {plazo_dias} días)")
                     else:
                         monto_total_deuda = capital_base_total
                         st.info(f"💵 Monto Total del Movimiento: **${monto_total_deuda:,.2f}**")
@@ -177,13 +174,11 @@ with tab_admin:
                     if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
                         if opcion_interes == "15% de Interés":
                             monto_total_deuda = monto_base * 1.15
-                            st.info(f"💡 Sale de caja (Capital): ${monto_base:,.2f} | Deuda Total con 15%: **${monto_total_deuda:,.2f}** | Plazo: {plazo_dias} días")
                         elif opcion_interes == "20% de Interés":
                             monto_total_deuda = monto_base * 1.20
-                            st.info(f"💡 Sale de caja (Capital): ${monto_base:,.2f} | Deuda Total con 20%: **${monto_total_deuda:,.2f}** | Plazo: {plazo_dias} días")
                         else:
                             monto_total_deuda = monto_base
-                            st.info(f"💡 Monto total: **${monto_total_deuda:,.2f}** | Plazo: {plazo_dias} días")
+                        st.info(f"💡 Sale de caja (Capital): ${monto_base:,.2f} | Deuda Total con interés en la calle: **${monto_total_deuda:,.2f}** | Plazo: {plazo_dias} días")
                     else:
                         monto_total_deuda = monto_base
                 
@@ -216,12 +211,9 @@ with tab_admin:
                                     
                                 desc_base = concepto_personalizado if concepto_personalizado else ("Préstamo inicial" + sufijo_prestamo if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else "Abono a cuenta")
                                 
-                                factor_proporcional = 1.0
-                                if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" and capital_base_total > 0:
-                                    factor_proporcional = monto_total_deuda / capital_base_total
-                                    
-                                m1_cargo_final = float(monto_c1) * factor_proporcional
-                                m2_cargo_final = float(monto_c2) * factor_proporcional
+                                # AQUÍ ESTÁ LA CLAVE: 
+                                # 1. Las cuentas de efectivo/binance registran estrictamente el CAPITAL PURO que salió de ellas.
+                                # 2. Al cliente se le carga el monto con el interés completo (monto_total_deuda).
                                 
                                 if tipo_movimiento == "Registrar Abono / Pago":
                                     if monto_c1 > 0:
@@ -229,10 +221,15 @@ with tab_admin:
                                     if monto_c2 > 0:
                                         filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} ({c_2})", 0.0, float(monto_c2)])
                                 else:
+                                    # Para repartir proporcionalmente el total con intereses al cliente manteniendo limpias las salidas de caja:
+                                    factor_proporcional = monto_total_deuda / capital_base_total if capital_base_total > 0 else 1.0
+                                    
                                     if monto_c1 > 0:
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_1} - Capital: ${float(monto_c1):,.2f})", float(m1_cargo_final), 0.0])
+                                        m1_cargo_cliente = float(monto_c1) * factor_proporcional
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_1} - Capital: ${float(monto_c1):,.2f})", float(m1_cargo_cliente), 0.0])
                                     if monto_c2 > 0:
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_2} - Capital: ${float(monto_c2):,.2f})", float(m2_cargo_final), 0.0])
+                                        m2_cargo_cliente = float(monto_c2) * factor_proporcional
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_2} - Capital: ${float(monto_c2):,.2f})", float(m2_cargo_cliente), 0.0])
                             else:
                                 if monto_total_deuda <= 0:
                                     st.error("⚠️ Ingresa un monto válido mayor a 0.")
@@ -242,7 +239,8 @@ with tab_admin:
                                     desc_default = concepto_personalizado if concepto_personalizado else f"Abono a cuenta ({cuenta_afectada})"
                                     filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, 0.0, float(monto_total_deuda)])
                                 else:
-                                    # IMPORTANTE: Guardamos el CAPITAL BASE en el concepto para rastrearlo limpio sin mezclar el interés total del cliente
+                                    # La caja registra la salida del CAPITAL EXACTO (monto_base) para que quede en 0, 
+                                    # pero al cliente se le carga el TOTAL con interés (monto_total_deuda).
                                     desc_default = concepto_personalizado if concepto_personalizado else f"Préstamo inicial (Salida de {cuenta_afectada} - Capital: ${monto_base:,.2f}){sufijo_prestamo}"
                                     filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, float(monto_total_deuda), 0.0])
                             
@@ -261,13 +259,11 @@ with tab_admin:
         # ------------------------------------------
         elif seccion_admin == "Inyectar Dinero / Alimentar Caja":
             st.subheader("Inyectar Dinero / Capital a una Cuenta")
-            st.write("Utiliza esta opción para agregar fondos propios o capital externo a tu Efectivo, Pago Móvil o Binance sin afectar cuentas de clientes.")
-            
             with st.form("form_inyectar"):
                 fecha_inyeccion = st.date_input("Fecha de inyección", datetime.now())
                 cuenta_destino_iny = st.selectbox("¿A qué cuenta ingresa el dinero?", ["Efectivo", "Pago Móvil", "Binance"])
                 monto_iny = st.number_input("Monto a inyectar ($)", min_value=0.0, value=0.0)
-                desc_iny = st.text_input("Nota / Descripción (Ej. Inyección de capital propio, Apertura de fondo, etc.)")
+                desc_iny = st.text_input("Nota / Descripción")
                 
                 btn_inyectar = st.form_submit_button("Ingresar Dinero a Caja")
                 
@@ -278,81 +274,60 @@ with tab_admin:
                             creds_dict = dict(st.secrets["connections"]["gsheets"])
                             creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
                             client = gspread.authorize(creds)
-                            
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
                             nota_final = desc_iny if desc_iny else f"Inyección de capital ({cuenta_destino_iny})"
-                            
-                            fila_inyeccion = [
-                                fecha_inyeccion.strftime("%Y-%m-%d"),
-                                f"CAJA_{cuenta_destino_iny.upper()}",
-                                f"Inyección de Capital ({cuenta_destino_iny})",
-                                nota_final,
-                                0.0,
-                                float(monto_iny)
-                            ]
-                            
+                            fila_inyeccion = [fecha_inyeccion.strftime("%Y-%m-%d"), f"CAJA_{cuenta_destino_iny.upper()}", f"Inyección de Capital ({cuenta_destino_iny})", nota_final, 0.0, float(monto_iny)]
                             sheet.append_row(fila_inyeccion)
-                            st.success(f"✅ ¡Inyección de ${monto_iny:,.2f} aplicada con éxito a {cuenta_destino_iny}!")
+                            st.success(f"✅ ¡Inyección aplicada con éxito!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al inyectar dinero: {e}")
-                    else:
-                        st.error("⚠️ Por favor, ingresa un monto válido mayor a 0.")
+                            st.error(f"Error: {e}")
 
         # ------------------------------------------
         # 3. TRANSFERIR ENTRE CUENTAS
         # ------------------------------------------
         elif seccion_admin == "Transferir entre Cuentas":
-            st.subheader("Mover Dinero entre Efectivo, Pago Móvil y Binance")
-            
+            st.subheader("Mover Dinero entre Cuentas")
             with st.form("form_transferencia"):
                 fecha_trans = st.date_input("Fecha de transferencia", datetime.now())
-                cuenta_origen = st.selectbox("Cuenta de ORIGEN (De dónde sale):", ["Efectivo", "Pago Móvil", "Binance"])
-                cuenta_destino = st.selectbox("Cuenta de DESTINO (A dónde llega):", ["Pago Móvil", "Efectivo", "Binance"])
+                cuenta_origen = st.selectbox("Cuenta de ORIGEN:", ["Efectivo", "Pago Móvil", "Binance"])
+                cuenta_destino = st.selectbox("Cuenta de DESTINO:", ["Pago Móvil", "Efectivo", "Binance"])
                 monto_trans = st.number_input("Monto a transferir ($)", min_value=0.0, value=0.0)
-                
                 btn_trans = st.form_submit_button("Realizar Transferencia")
                 
                 if btn_trans:
                     if cuenta_origen == cuenta_destino:
-                        st.error("⚠️ La cuenta de origen y destino no pueden ser iguales.")
+                        st.error("⚠️ La cuenta origen y destino no pueden ser iguales.")
                     elif monto_trans <= 0:
-                        st.error("⚠️ Ingresa un monto válido mayor a 0.")
+                        st.error("⚠️ Ingresa un monto mayor a 0.")
                     else:
                         try:
                             scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
                             creds_dict = dict(st.secrets["connections"]["gsheets"])
                             creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
                             client = gspread.authorize(creds)
-                            
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
-                            fila_mov_1 = [fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_origen.upper()}", f"Sistema ({cuenta_origen})", f"Transferencia enviada a {cuenta_destino}", float(monto_trans), 0.0]
-                            fila_mov_2 = [fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_destino.upper()}", f"Sistema ({cuenta_destino})", f"Transferencia recibida de {cuenta_origen}", 0.0, float(monto_trans)]
-                            
-                            sheet.append_row(fila_mov_1)
-                            sheet.append_row(fila_mov_2)
-                            
-                            st.success(f"✅ ¡Transferencia de ${monto_trans:,.2f} de {cuenta_origen} a {cuenta_destino} registrada con éxito!")
+                            sheet.append_row([fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_origen.upper()}", f"Sistema ({cuenta_origen})", f"Transferencia enviada a {cuenta_destino}", float(monto_trans), 0.0])
+                            sheet.append_row([fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_destino.upper()}", f"Sistema ({cuenta_destino})", f"Transferencia recibida de {cuenta_origen}", 0.0, float(monto_trans)])
+                            st.success("✅ ¡Transferencia exitosa!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al registrar la transferencia: {e}")
+                            st.error(f"Error: {e}")
 
         # ------------------------------------------
         # 4. REGISTRAR GASTO
         # ------------------------------------------
         elif seccion_admin == "Registrar Gasto":
-            st.subheader("Registrar Salida de Dinero / Gasto")
-            
+            st.subheader("Registrar Gasto")
             with st.form("form_gasto"):
-                fecha_gasto = st.date_input("Fecha del gasto", datetime.now())
-                cuenta_gasto = st.selectbox("Cuenta de donde se paga el gasto:", ["Efectivo", "Pago Móvil", "Binance"])
-                desc_gasto = st.text_input("Descripción del Gasto (Ej. Alquiler, Servicios, etc.)")
-                monto_gasto = st.number_input("Monto del Gasto ($)", min_value=0.0, value=0.0)
-                
+                fecha_gasto = st.date_input("Fecha", datetime.now())
+                cuenta_gasto = st.selectbox("Cuenta:", ["Efectivo", "Pago Móvil", "Binance"])
+                desc_gasto = st.text_input("Descripción")
+                monto_gasto = st.number_input("Monto ($)", min_value=0.0, value=0.0)
                 btn_gasto = st.form_submit_button("Guardar Gasto")
                 
                 if btn_gasto:
@@ -362,35 +337,22 @@ with tab_admin:
                             creds_dict = dict(st.secrets["connections"]["gsheets"])
                             creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
                             client = gspread.authorize(creds)
-                            
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
-                            fila_gasto = [
-                                fecha_gasto.strftime("%Y-%m-%d"),
-                                f"GASTO_{cuenta_gasto.upper()}",
-                                f"Gastos del Negocio ({cuenta_gasto})",
-                                desc_gasto,
-                                float(monto_gasto),
-                                0.0
-                            ]
-                            
-                            sheet.append_row(fila_gasto)
-                            st.success(f"✅ ¡Gasto de ${monto_gasto:,.2f} registrado exitosamente!")
+                            sheet.append_row([fecha_gasto.strftime("%Y-%m-%d"), f"GASTO_{cuenta_gasto.upper()}", f"Gastos del Negocio ({cuenta_gasto})", desc_gasto, float(monto_gasto), 0.0])
+                            st.success("✅ ¡Gasto registrado!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al registrar el gasto: {e}")
-                    else:
-                        st.error("⚠️ Por favor, ingresa una descripción y un monto válido.")
+                            st.error(f"Error: {e}")
 
         # ------------------------------------------
         # 5. LIQUIDAR / CERRAR CRÉDITO ACTUAL
         # ------------------------------------------
         elif seccion_admin == "Liquidar / Cerrar Crédito":
-            st.subheader("Cerrar Ciclo Actual para Nuevo Préstamo")
-            
+            st.subheader("Cerrar Ciclo Actual")
             if opciones_clientes:
-                cliente_a_liquidar = st.selectbox("Selecciona al Cliente a Liquidar:", opciones_clientes, key="liq_cliente")
+                cliente_a_liquidar = st.selectbox("Selecciona al Cliente:", opciones_clientes, key="liq_cliente")
                 codigo_liq = cliente_a_liquidar.split(" - ")[0]
                 nombre_liq = cliente_a_liquidar.split(" - ")[1]
                 
@@ -400,27 +362,16 @@ with tab_admin:
                         creds_dict = dict(st.secrets["connections"]["gsheets"])
                         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
                         client = gspread.authorize(creds)
-                        
                         spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                         sheet = client.open_by_url(spreadsheet_url).sheet1
                         
-                        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-                        fila_corte = [
-                            fecha_hoy,
-                            str(codigo_liq).strip(),
-                            nombre_liq,
-                            "Crédito anterior liquidado / Inicio nuevo ciclo",
-                            0.0,
-                            0.0
-                        ]
-                        
-                        sheet.append_row(fila_corte)
-                        st.success(f"✅ ¡Crédito liquidado con éxito para {nombre_liq}!")
+                        sheet.append_row([datetime.now().strftime("%Y-%m-%d"), str(codigo_liq).strip(), nombre_liq, "Crédito anterior liquidado / Inicio nuevo ciclo", 0.0, 0.0])
+                        st.success("✅ ¡Crédito liquidado!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al liquidar el crédito: {e}")
+                        st.error(f"Error: {e}")
             else:
-                st.info("No hay clientes registrados.")
+                st.info("No hay clientes.")
 
         # ------------------------------------------
         # 6. FLUJO DE CAJA Y CUENTAS
@@ -441,10 +392,8 @@ with tab_admin:
                     total_abonos_general = df_existente['Abono'].sum()
                     total_gastos = df_existente[df_existente['Codigo'].str.contains("GASTO_", na=False)]['Cargo'].sum()
                     
-                    # CÁLCULO ESTRICTO Y AISLADO POR CUENTA (Basado exactamente en texto clave de origen/salida y códigos de sistema)
                     def calcular_saldo_cuenta(nombre_cuenta):
                         n = nombre_cuenta.lower()
-                        # Ingresos: Abonos de clientes o inyecciones o transferencias que mencionen estrictamente la cuenta
                         ingresos_abonos = df_existente[
                             (df_existente['Abono'] > 0) & 
                             (df_existente['Concepto'].str.lower().str.contains(f"({n})", regex=True) | df_existente['Codigo'].str.lower().str.contains(f"caja_{n}|cuenta_{n}", regex=True))
@@ -457,21 +406,26 @@ with tab_admin:
                         
                         total_entradas = ingresos_abonos + ingresos_transf
                         
-                        # Salidas: Préstamos (buscando el capital exacto extraído de esta cuenta), gastos o transferencias enviadas
-                        # Buscamos salidas explícitas de capital para evitar duplicar el interés del cliente
-                        mask_prestamo_cuenta = df_existente['Concepto'].str.lower().str.contains(f"salida de {n}", regex=True)
-                        if mask_prestamo_cuenta.any():
-                            # Extraemos limpiamente el monto de capital real que salió de esta cuenta en los conceptos
-                            # Si no se puede extraer por regex, tomamos el cargo proporcional o total asociado a la salida de esa cuenta
-                            salidas_prestamos = df_existente[mask_prestamo_cuenta & (df_existente['Cargo'] > 0)]['Cargo'].sum()
+                        # CORRECCIÓN DE SALIDAS DE CAJA: 
+                        # Extrae limpiamente el capital base real indicado en el texto del concepto, 
+                        # evitando que tome el monto con intereses que se le cargó al cliente.
+                        mask_cuenta = df_existente['Concepto'].str.lower().str.contains(f"salida de {n}", regex=True)
+                        if mask_cuenta.any():
+                            sub_df = df_existente[mask_cuenta]
+                            salidas_prestamos = 0.0
+                            for _, row_item in sub_df.iterrows():
+                                texto_c = str(row_item['Concepto'])
+                                if "capital: $" in texto_c.lower():
+                                    try:
+                                        part = texto_c.lower().split("capital: $")[1].split(" ")[0].replace(",", "")
+                                        salidas_prestamos += float(part)
+                                    except:
+                                        salidas_prestamos += float(row_item['Cargo'])
+                                else:
+                                    salidas_prestamos += float(row_item['Cargo'])
                         else:
-                            # Compatibilidad con registros viejos donde se cargó el total
-                            salidas_prestamos = df_existente[
-                                (df_existente['Cargo'] > 0) & 
-                                (~df_existente['Codigo'].str.contains("GASTO_|CUENTA_|CAJA_", na=False)) & 
-                                (df_existente['Concepto'].str.lower().str.contains(n))
-                            ]['Cargo'].sum()
-                            
+                            salidas_prestamos = 0.0
+
                         salidas_gastos = df_existente[
                             (df_existente['Cargo'] > 0) & 
                             (df_existente['Codigo'].str.lower().str.contains(f"gasto_{n}", regex=True))
@@ -484,7 +438,6 @@ with tab_admin:
                         ]['Cargo'].sum()
                         
                         total_salidas = salidas_prestamos + salidas_gastos + salidas_transf
-                        
                         return total_entradas - total_salidas
 
                     efectivo_total = calcular_saldo_cuenta("efectivo")
@@ -507,9 +460,9 @@ with tab_admin:
                     st.subheader("Estado de Cuenta de Clientes")
                     st.dataframe(resumen_clientes[['Codigo', 'Nombre', 'Total_Cargos', 'Total_Abonos', 'Saldo_Pendiente']], use_container_width=True, hide_index=True)
                 else:
-                    st.info("Aún no hay registros en la base de datos.")
+                    st.info("Aún no hay registros.")
             except Exception as e:
-                st.error(f"Error al calcular el flujo de caja: {e}")
+                st.error(f"Error: {e}")
                 
     elif clave_admin != "":
         st.error("Contraseña incorrecta.")
