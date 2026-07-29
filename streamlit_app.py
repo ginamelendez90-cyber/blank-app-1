@@ -5,12 +5,17 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="Gestión de Cobros", page_icon="💰")
-st.title("Sistema de Cobros y Pagos")
+st.set_page_config(page_title="Sistema de Cobros y Finanzas", page_icon="💰")
+st.title("Sistema de Gestión Financiera")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-tab_cliente, tab_admin = st.tabs(["Consulta de Cliente", "Administrador (Registrar Movimiento)"])
+# Dividimos en tres pestañas: Cliente, Registro de Cobros, y Finanzas / Gastos
+tab_cliente, tab_admin_cobros, tab_finanzas = st.tabs([
+    "Consulta de Cliente", 
+    "Administrador (Cobros)", 
+    "Finanzas y Saldo en la Calle"
+])
 
 # ==========================================
 # PESTAÑA 1: CLIENTE
@@ -32,12 +37,8 @@ with tab_cliente:
                 st.success("¡Datos encontrados!")
                 
                 nombre = resultado.iloc[0]['Nombre']
-                
-                # El total de la deuda es la suma de los cargos (ej. el préstamo inicial)
                 total_cargos = resultado['Cargo'].sum()
-                # El total de pagos es la suma de todos los abonos registrados
                 total_pagos = resultado['Abono'].sum()
-                # El saldo pendiente se descuenta automáticamente
                 saldo_pendiente = total_cargos - total_pagos
                 
                 st.subheader(f"Cliente: {nombre}")
@@ -58,16 +59,15 @@ with tab_cliente:
             st.warning("Por favor ingrese un código válido.")
 
 # ==========================================
-# PESTAÑA 2: ADMINISTRADOR
+# PESTAÑA 2: ADMINISTRADOR (REGISTRAR COBROS)
 # ==========================================
-with tab_admin:
-    st.write("Área restringida para registrar nuevos movimientos.")
-    clave = st.text_input("Contraseña de Administrador:", type="password")
+with tab_admin_cobros:
+    st.write("Área restringida para registrar nuevos movimientos de clientes.")
+    clave_cobros = st.text_input("Contraseña de Administrador:", type="password", key="clave_c")
     
-    if clave == "admin123":
+    if clave_cobros == "admin123":
         st.info("Acceso concedido.")
         
-        # Opciones para elegir si es el préstamo inicial o un nuevo abono
         tipo_movimiento = st.radio("¿Qué deseas registrar?", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
         
         with st.form("formulario_registro", clear_on_submit=True):
@@ -104,7 +104,7 @@ with tab_admin:
                             str(nuevo_codigo).strip(),
                             nuevo_nombre,
                             nuevo_concepto,
-                            cargo_val,
+                      cargo_val,
                             abono_val
                         ]
                         
@@ -114,5 +114,51 @@ with tab_admin:
                         st.error(f"Error al guardar: {e}")
                 else:
                     st.error("⚠️ Por favor, completa el código y el nombre del cliente.")
-    elif clave != "":
+    elif clave_cobros != "":
+        st.error("Contraseña incorrecta.")
+
+# ==========================================
+# PESTAÑA 3: FINANZAS (SALDO EN LA CALLE Y GASTOS)
+# ==========================================
+with tab_finanzas:
+    st.write("Panel general de finanzas, saldo total prestado y control de gastos.")
+    clave_finanzas = st.text_input("Contraseña de Administrador:", type="password", key="clave_f")
+    
+    if clave_finanzas == "admin123":
+        st.info("Acceso concedido al panel financiero.")
+        
+        # Leemos los datos actuales de la hoja
+        try:
+            df_finanzas = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
+            
+            # Filtramos para calcular el saldo en la calle (excluyendo la palabra GASTO si la usamos en código o concepto)
+            # Calculamos por cada cliente la diferencia entre sus cargos y sus abonos
+            if not df_finanzas.empty:
+                # Agrupamos por cliente para ver su deuda individual actual
+                resumen_clientes = df_finanzas.groupby(['Codigo', 'Nombre']).agg(
+                    Total_Cargos=('Cargo', 'sum'),
+                    Total_Abonos=('Abono', 'sum')
+                ).reset_index()
+                
+                resumen_clientes['Saldo_Pendiente'] = resumen_clientes['Total_Cargos'] - resumen_clientes['Total_Abonos']
+                
+                # Saldo total en la calle = la suma de los saldos pendientes de todos los clientes
+                saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
+                total_recaudado = resumen_clientes['Total_Abonos'].sum()
+                
+                st.subheader("Resumen General")
+                col_f1, col_f2 = st.columns(2)
+                col_f1.metric("💰 Dinero Total en la Calle (Por Cobrar)", f"${saldo_en_la_calle:,.2f}")
+                col_f2.metric("💵 Total Histórico Recaudado (Abonos)", f"${total_recaudado:,.2f}")
+                
+                st.divider()
+                st.subheader("Estado de Cuenta por Cliente")
+                st.dataframe(resumen_clientes[['Codigo', 'Nombre', 'Total_Cargos', 'Total_Abonos', 'Saldo_Pendiente']], use_container_width=True, hide_index=True)
+            else:
+                st.info("Aún no hay registros en la base de datos.")
+                
+        except Exception as e:
+            st.error(f"No se pudieron cargar los datos financieros: {e}")
+            
+    elif clave_finanzas != "":
         st.error("Contraseña incorrecta.")
