@@ -22,14 +22,11 @@ with tab_cliente:
     if st.button("Consultar"):
         if codigo_cliente:
             try:
-                # Intentamos leer con la nueva columna Cuenta
                 df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cuenta', 'Cargo', 'Abono'])
             except:
-                # Si la hoja vieja aún no tiene la columna Cuenta, leemos sin ella y la creamos por defecto
                 df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
                 df['Cuenta'] = "Efectivo"
             
-            # Limpiamos y aseguramos tipos de datos numéricos para evitar errores de resta
             df['Codigo'] = df['Codigo'].astype(str).str.strip()
             df['Cargo'] = pd.to_numeric(df['Cargo'], errors='coerce').fillna(0.0)
             df['Abono'] = pd.to_numeric(df['Abono'], errors='coerce').fillna(0.0)
@@ -393,11 +390,33 @@ with tab_admin:
                 if not df_existente.empty:
                     df_clientes = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)]
                     
-                    resumen_clientes = df_clientes.groupby(['Codigo', 'Nombre']).agg(
-                        Total_Cargos=('Cargo', 'sum'),
-                        Total_Abonos=('Abono', 'sum')
-                    ).reset_index()
-                    resumen_clientes['Saldo_Pendiente'] = resumen_clientes['Total_Cargos'] - resumen_clientes['Total_Abonos']
+                    # Cálculo correcto y robusto por cliente para aislar ciclos activos
+                    lista_resumen_clientes = []
+                    for codigo_cliente_val, grupo_c in df_clientes.groupby('Codigo'):
+                        nombre_c = grupo_c.iloc[0]['Nombre']
+                        indices_liq = grupo_c[grupo_c['Concepto'].str.contains("Crédito anterior liquidado", case=False, na=False)].index
+                        
+                        if not indices_liq.empty:
+                            ultimo_corte = indices_liq[-1]
+                            movs_ciclo = grupo_c.loc[grupo_c.index > ultimo_corte]
+                        else:
+                            movs_ciclo = grupo_c
+                            
+                        cargos_ciclo = movs_ciclo['Cargo'].sum()
+                        abonos_ciclo = movs_ciclo['Abono'].sum()
+                        saldo_actual_cli = cargos_ciclo - abonos_ciclo
+                        
+                        lista_resumen_clientes.append({
+                            'Codigo': codigo_cliente_val,
+                            'Nombre': nombre_c,
+                            'Total_Cargos': cargos_ciclo,
+                            'Total_Abonos': abonos_ciclo,
+                            'Saldo_Pendiente': max(0.0, saldo_actual_cli) # Evita negativos por redondeos
+                        })
+                    
+                    resumen_clientes = pd.DataFrame(lista_resumen_clientes)
+                    
+                    # Dinero en la calle = suma de saldos pendientes de los ciclos activos mayores a cero
                     saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
                     
                     total_abonos_general = df_existente['Abono'].sum()
