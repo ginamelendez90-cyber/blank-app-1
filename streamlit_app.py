@@ -63,29 +63,28 @@ with tab_admin:
     if clave_admin == "admin123":
         st.success("Acceso concedido al panel de control.")
         
-        seccion_admin = st.radio("¿Qué deseas hacer?", ["Registrar Movimientos", "Ver Finanzas y Saldo en la Calle"])
+        seccion_admin = st.radio("¿Qué deseas hacer?", ["Registrar Movimientos", "Liquidar / Archivar Crédito", "Ver Finanzas y Saldo en la Calle"])
         
         st.divider()
         
+        # Leemos la lista actual de clientes para usarla en los selectores
+        try:
+            df_existente = conn.read(ttl=0, usecols=['Codigo', 'Nombre'])
+            df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
+            df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
+            clientes_unicos = df_existente.drop_duplicates(subset=['Codigo']).to_dict(orient='records')
+            opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
+        except Exception:
+            opciones_clientes = []
+
         # ------------------------------------------
         # SECCIÓN A: REGISTRAR MOVIMIENTOS
         # ------------------------------------------
         if seccion_admin == "Registrar Movimientos":
             st.subheader("Registrar Nuevo Cobro o Préstamo")
             
-            # Leemos la lista actual de clientes fuera del formulario para que responda al instante
-            try:
-                df_existente = conn.read(ttl=0, usecols=['Codigo', 'Nombre'])
-                df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
-                df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
-                clientes_unicos = df_existente.drop_duplicates(subset=['Codigo']).to_dict(orient='records')
-                opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
-            except Exception:
-                opciones_clientes = []
-            
             tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
             
-            # Controles fuera del formulario para habilitar/deshabilitar de inmediato
             es_nuevo_cliente = st.checkbox("➕ Registrar como cliente NUEVO")
             
             if not es_nuevo_cliente and opciones_clientes:
@@ -97,7 +96,6 @@ with tab_admin:
                 nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-002)")
                 nuevo_nombre = st.text_input("Nombre del Cliente")
             
-            # Formulario solo para la fecha, concepto y montos (lo que se envía al hacer clic en Guardar)
             with st.form("formulario_registro"):
                 nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
                 
@@ -140,9 +138,69 @@ with tab_admin:
                             st.error(f"Error al guardar: {e}")
                     else:
                         st.error("⚠️ Por favor, asegúrate de colocar el código y el nombre del cliente.")
-        
+
         # ------------------------------------------
-        # SECCIÓN B: FINANZAS Y SALDO EN LA CALLE
+        # SECCIÓN B: LIQUIDAR / ARCHIVAR CRÉDITO TERMINADO
+        # ------------------------------------------
+        elif seccion_admin == "Liquidar / Archivar Crédito":
+            st.subheader("Cerrar Historial Antiguo de un Cliente")
+            st.write("Esta opción limpia el historial pasado de un cliente que ya terminó de pagar, dejándolo en cero para que sus futuros movimientos comiencen desde un historial limpio.")
+            
+            if opciones_clientes:
+                cliente_a_liquidar = st.selectbox("Selecciona al Cliente a Liquidar:", opciones_clientes, key="liq_cliente")
+                codigo_liq = cliente_a_liquidar.split(" - ")[0]
+                nombre_liq = cliente_a_liquidar.split(" - ")[1]
+                
+                if st.button("🧹 Limpiar e Inicializar Historial"):
+                    try:
+                        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                        creds_dict = dict(st.secrets["connections"]["gsheets"])
+                        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+                        client = gspread.authorize(creds)
+                        
+                        spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+                        sheet = client.open_by_url(spreadsheet_url).sheet1
+                        
+                        # Leemos todos los datos actuales de la hoja
+                        data_rows = sheet.get_all_records()
+                        
+                        # Filtramos para CONSERVAR los registros de OTROS clientes y ELIMINAR los del cliente liquidado
+                        # (Opcional: Si quieres guardar un registro de cierre con saldo 0, puedes hacerlo)
+                        nuevas_filas = []
+                        # Cabeceras originales
+                        header = ['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono']
+                        
+                        for row in data_rows:
+                            # Aseguramos comparar como texto limpio
+                            if str(row.get('Codigo', '')).strip() != str(codigo_liq).strip():
+                                novas_fila_lista = [
+                                    str(row.get('Fecha', '')),
+                                    str(row.get('Codigo', '')),
+                                    str(row.get('Nombre', '')),
+                                    str(row.get('Concepto', '')),
+                                    float(row.get('Cargo', 0) or 0),
+                                    float(row.get('Abono', 0) or 0)
+                                ]
+                                nuevas_filas.append(novas_fila_lista)
+                        
+                        # Agregamos una fila limpia de inicio de ciclo en cero para este cliente
+                        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+                        nuevas_filas.append([fecha_hoy, str(codigo_liq).strip(), nombre_liq, "Crédito anterior liquidado / Ciclo nuevo", 0.0, 0.0])
+                        
+                        # Limpiamos y reescribimos la hoja limpia
+                        sheet.clear()
+                        sheet.append_row(header)
+                        for f in nuevas_filas:
+                            sheet.append_row(f)
+                            
+                        st.success(f"✅ ¡El historial de {nombre_liq} ha sido archivado y limpiado exitosamente!")
+                    except Exception as e:
+                        st.error(f"Error al liquidar el crédito: {e}")
+            else:
+                st.info("No hay clientes registrados en el sistema.")
+
+        # ------------------------------------------
+        # SECCIÓN C: FINANZAS Y SALDO EN LA CALLE
         # ------------------------------------------
         else:
             st.subheader("Resumen Financiero General")
