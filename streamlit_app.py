@@ -103,7 +103,7 @@ with tab_admin:
             df_existente = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
             df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
             df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
-            clientes_unicos = df_existente.drop_duplicates(subset=['Codigo']).to_dict(orient='records')
+            clientes_unicos = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)].drop_duplicates(subset=['Codigo']).to_dict(orient='records')
             opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
         except Exception:
             opciones_clientes = []
@@ -203,6 +203,7 @@ with tab_admin:
                                 sheet.append_row(fila)
                                 
                             st.success(f"✅ ¡Movimiento registrado correctamente para {nuevo_nombre}!")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar: {e}")
                     else:
@@ -236,7 +237,6 @@ with tab_admin:
                             
                             nota_final = desc_iny if desc_iny else f"Inyección de capital ({cuenta_destino_iny})"
                             
-                            # Se registra como un Abono/Ingreso interno en la cuenta seleccionada
                             fila_inyeccion = [
                                 fecha_inyeccion.strftime("%Y-%m-%d"),
                                 f"CAJA_{cuenta_destino_iny.upper()}",
@@ -248,6 +248,7 @@ with tab_admin:
                             
                             sheet.append_row(fila_inyeccion)
                             st.success(f"✅ ¡Inyección de ${monto_iny:,.2f} aplicada con éxito a {cuenta_destino_iny}!")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Error al inyectar dinero: {e}")
                     else:
@@ -289,6 +290,7 @@ with tab_admin:
                             sheet.append_row(fila_mov_2)
                             
                             st.success(f"✅ ¡Transferencia de ${monto_trans:,.2f} de {cuenta_origen} a {cuenta_destino} registrada con éxito!")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Error al registrar la transferencia: {e}")
 
@@ -328,6 +330,7 @@ with tab_admin:
                             
                             sheet.append_row(fila_gasto)
                             st.success(f"✅ ¡Gasto de ${monto_gasto:,.2f} registrado exitosamente!")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Error al registrar el gasto: {e}")
                     else:
@@ -366,6 +369,7 @@ with tab_admin:
                         
                         sheet.append_row(fila_corte)
                         st.success(f"✅ ¡Crédito liquidado con éxito para {nombre_liq}!")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Error al liquidar el crédito: {e}")
             else:
@@ -389,19 +393,20 @@ with tab_admin:
                     
                     total_abonos_general = df_existente['Abono'].sum()
                     
+                    # Filtros mejorados que integran de forma exacta: Abonos, Inyecciones, Transferencias, Gastos y Préstamos por cuenta
                     efectivo_total = (
-                        df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False)]['Abono'].sum() - 
-                        df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False)]['Cargo'].sum()
+                        df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False) | df_existente['Codigo'].str.contains("CAJA_EFECTIVO", case=False, na=False)]['Abono'].sum() - 
+                        df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False) | df_existente['Codigo'].str.contains("GASTO_EFECTIVO", case=False, na=False)]['Cargo'].sum()
                     )
                     
                     pago_movil_total = (
-                        df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False)]['Abono'].sum() - 
-                        df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False)]['Cargo'].sum()
+                        df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False) | df_existente['Codigo'].str.contains("CAJA_PAGO MÓVIL|CAJA_PAGO MOVIL", case=False, na=False)]['Abono'].sum() - 
+                        df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False) | df_existente['Codigo'].str.contains("GASTO_PAGO MÓVIL|GASTO_PAGO MOVIL", case=False, na=False)]['Cargo'].sum()
                     )
                     
                     binance_total = (
-                        df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False)]['Abono'].sum() - 
-                        df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False)]['Cargo'].sum()
+                        df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False) | df_existente['Codigo'].str.contains("CAJA_BINANCE", case=False, na=False)]['Abono'].sum() - 
+                        df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False) | df_existente['Codigo'].str.contains("GASTO_BINANCE", case=False, na=False)]['Cargo'].sum()
                     )
 
                     total_gastos = df_existente[df_existente['Codigo'].str.contains("GASTO_", na=False)]['Cargo'].sum()
