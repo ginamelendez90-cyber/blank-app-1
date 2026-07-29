@@ -78,10 +78,7 @@ with tab_admin:
             
             if boton_guardar:
                 if nuevo_codigo and nuevo_nombre and nuevo_concepto:
-                    # 1. Leemos los datos actuales asegurando las columnas
-                    df_actual = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
-                    
-                    # 2. Creamos la nueva fila
+                    # Preparamos la fila exacta en formato de lista o dataframe individual
                     nuevo_registro = pd.DataFrame([{
                         "Fecha": nueva_fecha.strftime("%Y-%m-%d"),
                         "Codigo": str(nuevo_codigo).strip(),
@@ -91,13 +88,16 @@ with tab_admin:
                         "Abono": float(nuevo_abono)
                     }])
                     
-                    # 3. Concatenamos
+                    # Leemos lo actual, concatenamos y usamos un bloque protegido
+                    df_actual = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
                     df_actualizado = pd.concat([df_actual, nuevo_registro], ignore_index=True)
                     
-                    # 4. Actualizamos Google Sheets
-                    conn.update(data=df_actualizado)
-                    
-                    st.success(f"✅ ¡Movimiento registrado exitosamente para {nuevo_nombre}!")
+                    try:
+                        # Forzamos la actualización especificando la worksheet principal
+                        conn.update(worksheet="Sheet1", data=df_actualizado)
+                        st.success(f"✅ ¡Movimiento registrado exitosamente para {nuevo_nombre}!")
+                    except Exception as e:
+                        st.error(f"Error al guardar en Google Sheets. Asegúrate de que la pestaña se llame 'Sheet1'. Detalle: {e}")
                 else:
                     st.error("⚠️ Por favor, completa el código, nombre y concepto.")
     elif clave != "":
