@@ -10,7 +10,6 @@ st.title("Sistema de Gestión de Cobros")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Solo dos pestañas: una para el cliente y otra unificada para ti (Administrador)
 tab_cliente, tab_admin = st.tabs(["Consulta de Cliente", "Panel de Administrador"])
 
 # ==========================================
@@ -64,7 +63,6 @@ with tab_admin:
     if clave_admin == "admin123":
         st.success("Acceso concedido al panel de control.")
         
-        # Sub-secciones o pestañas internas dentro del panel de administrador
         seccion_admin = st.radio("¿Qué deseas hacer?", ["Registrar Movimientos", "Ver Finanzas y Saldo en la Calle"])
         
         st.divider()
@@ -73,13 +71,37 @@ with tab_admin:
         # SECCIÓN A: REGISTRAR MOVIMIENTOS
         # ------------------------------------------
         if seccion_admin == "Registrar Movimientos":
-            st.subheader("Registrar Nuevo Cobro o Préstamo")
+            st.subheader("Registrar Nuevo Cobro o Préstamo de forma Rápida")
+            
+            # Leemos la lista actual de clientes para armar el menú desplegable
+            try:
+                df_existente = conn.read(ttl=0, usecols=['Codigo', 'Nombre'])
+                df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
+                df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
+                
+                # Creamos una lista única de clientes (Código - Nombre)
+                clientes_unicos = df_existente.drop_duplicates(subset=['Codigo']).to_dict(orient='records')
+                opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
+            except Exception:
+                opciones_clientes = []
+            
             tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
             
             with st.form("formulario_registro", clear_on_submit=True):
                 nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
-                nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-001)")
-                nuevo_nombre = st.text_input("Nombre del Cliente")
+                
+                # Opción para seleccionar cliente existente o crear uno nuevo
+                es_nuevo_cliente = st.checkbox("➕ Registrar como cliente NUEVO")
+                
+                if not es_nuevo_cliente and opciones_clientes:
+                    cliente_seleccionado = st.selectbox("Selecciona al Cliente Existente:", opciones_clientes)
+                    # Separamos el código y el nombre automáticamente del texto seleccionado
+                    nuevo_codigo = cliente_seleccionado.split(" - ")[0]
+                    nuevo_nombre = cliente_seleccionado.split(" - ")[1]
+                else:
+                    st.info("Ingresa los datos del nuevo cliente:")
+                    nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-002)")
+                    nuevo_nombre = st.text_input("Nombre del Cliente")
                 
                 if tipo_movimiento == "Registrar Abono / Pago":
                     nuevo_concepto = st.text_input("Concepto", value="Abono a cuenta")
