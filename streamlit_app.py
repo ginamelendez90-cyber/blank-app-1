@@ -8,7 +8,6 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="Gestión de Cobros", page_icon="💰")
 st.title("Sistema de Cobros y Pagos")
 
-# Conectar usando los secretos configurados en Streamlit
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 tab_cliente, tab_admin = st.tabs(["Consulta de Cliente", "Administrador (Registrar Movimiento)"])
@@ -33,15 +32,19 @@ with tab_cliente:
                 st.success("¡Datos encontrados!")
                 
                 nombre = resultado.iloc[0]['Nombre']
+                
+                # El total de la deuda es la suma de los cargos (ej. el préstamo inicial)
                 total_cargos = resultado['Cargo'].sum()
+                # El total de pagos es la suma de todos los abonos registrados
                 total_pagos = resultado['Abono'].sum()
+                # El saldo pendiente se descuenta automáticamente
                 saldo_pendiente = total_cargos - total_pagos
                 
                 st.subheader(f"Cliente: {nombre}")
                 
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Total Cargos (Deuda)", f"${total_cargos:,.2f}")
-                col2.metric("Total Pagos", f"${total_pagos:,.2f}")
+                col1.metric("Monto Total Préstamo", f"${total_cargos:,.2f}")
+                col2.metric("Total Abonado", f"${total_pagos:,.2f}")
                 col3.metric("Saldo Pendiente", f"${saldo_pendiente:,.2f}")
                 
                 st.divider()
@@ -58,54 +61,58 @@ with tab_cliente:
 # PESTAÑA 2: ADMINISTRADOR
 # ==========================================
 with tab_admin:
-    st.write("Área restringida para registrar nuevos cobros o pagos en la base de datos.")
+    st.write("Área restringida para registrar nuevos movimientos.")
     clave = st.text_input("Contraseña de Administrador:", type="password")
     
     if clave == "admin123":
-        st.info("Acceso concedido. Completa los datos para registrar un movimiento.")
+        st.info("Acceso concedido.")
+        
+        # Opciones para elegir si es el préstamo inicial o un nuevo abono
+        tipo_movimiento = st.radio("¿Qué deseas registrar?", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
         
         with st.form("formulario_registro", clear_on_submit=True):
             nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
             nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-001)")
             nuevo_nombre = st.text_input("Nombre del Cliente")
-            nuevo_concepto = st.text_input("Concepto (Ej. Pago de cuota, Nuevo servicio)")
             
-            col_cargo, col_abono = st.columns(2)
-            nuevo_cargo = col_cargo.number_input("Cargo / Nueva Deuda ($)", min_value=0.0, value=0.0)
-            nuevo_abono = col_abono.number_input("Abono / Pago Recibido ($)", min_value=0.0, value=0.0)
+            if tipo_movimiento == "Registrar Abono / Pago":
+                nuevo_concepto = st.text_input("Concepto", value="Abono a cuenta")
+                monto = st.number_input("Monto del Abono ($)", min_value=0.0, value=0.0)
+                cargo_val = 0.0
+                abono_val = float(monto)
+            else:
+                nuevo_concepto = st.text_input("Concepto", value="Préstamo inicial / Deuda")
+                monto = st.number_input("Monto del Préstamo/Deuda ($)", min_value=0.0, value=0.0)
+                cargo_val = float(monto)
+                abono_val = 0.0
             
-            boton_guardar = st.form_submit_button("Guardar Registro")
+            boton_guardar = st.form_submit_button("Guardar en el Sistema")
             
             if boton_guardar:
-                if nuevo_codigo and nuevo_nombre and nuevo_concepto:
+                if nuevo_codigo and nuevo_nombre:
                     try:
-                        # Autenticación directa con gspread usando los secretos de Streamlit
                         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
                         creds_dict = dict(st.secrets["connections"]["gsheets"])
                         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
                         client = gspread.authorize(creds)
                         
-                        # Abrir la hoja por la URL configurada en los secretos
                         spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                         sheet = client.open_by_url(spreadsheet_url).sheet1
                         
-                        # Preparar la fila exacta
                         fila_nueva = [
                             nueva_fecha.strftime("%Y-%m-%d"),
                             str(nuevo_codigo).strip(),
                             nuevo_nombre,
                             nuevo_concepto,
-                            float(nuevo_cargo),
-                            float(nuevo_abono)
+                            cargo_val,
+                            abono_val
                         ]
                         
-                        # Agregar la fila al final de la hoja de forma limpia y directa
                         sheet.append_row(fila_nueva)
-                        
-                        st.success(f"✅ ¡Movimiento registrado exitosamente para {nuevo_nombre}!")
+                        st.success(f"✅ ¡Registrado correctamente para {nuevo_nombre}!")
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
                 else:
-                    st.error("⚠️ Por favor, completa el código, nombre y concepto.")
+                    st.error("⚠️ Por favor, completa el código y el nombre del cliente.")
     elif clave != "":
         st.error("Contraseña incorrecta.")
