@@ -1,6 +1,3 @@
 streamlit
-pytesseract
-Pillow
-numpy
-scipy
-
+pandas
+st-gsheets-connection
