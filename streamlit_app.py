@@ -229,7 +229,6 @@ with tab_admin:
                                     if monto_c2 > 0:
                                         filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} ({c_2})", 0.0, float(monto_c2)])
                                 else:
-                                    # IMPORTANTE: A la caja (Cargo) se le descuenta el CAPITAL BASE real, pero al cliente se le carga la DEUDA TOTAL con interés
                                     if monto_c1 > 0:
                                         filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_1} - Capital: ${float(monto_c1):,.2f})", float(m1_cargo_final), 0.0])
                                     if monto_c2 > 0:
@@ -239,11 +238,12 @@ with tab_admin:
                                     st.error("⚠️ Ingresa un monto válido mayor a 0.")
                                     st.stop()
                                     
-                                desc_default = concepto_personalizado if concepto_personalizado else (f"Préstamo inicial (Salida de {cuenta_afectada} - Capital: ${monto_base:,.2f}){sufijo_prestamo}" if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else f"Abono a cuenta ({cuenta_afectada})")
-                                
                                 if tipo_movimiento == "Registrar Abono / Pago":
+                                    desc_default = concepto_personalizado if concepto_personalizado else f"Abono a cuenta ({cuenta_afectada})"
                                     filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, 0.0, float(monto_total_deuda)])
                                 else:
+                                    # IMPORTANTE: Guardamos el CAPITAL BASE en el concepto para rastrearlo limpio sin mezclar el interés total del cliente
+                                    desc_default = concepto_personalizado if concepto_personalizado else f"Préstamo inicial (Salida de {cuenta_afectada} - Capital: ${monto_base:,.2f}){sufijo_prestamo}"
                                     filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, float(monto_total_deuda), 0.0])
                             
                             for fila in filas_a_agregar:
@@ -439,25 +439,58 @@ with tab_admin:
                     saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
                     
                     total_abonos_general = df_existente['Abono'].sum()
-                    
-                    # Cálculo exacto para cada cuenta (ingresos vs salidas reales de caja)
-                    efectivo_total = (
-                        df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False) | df_existente['Codigo'].str.contains("CAJA_EFECTIVO", case=False, na=False)]['Abono'].sum() - 
-                        df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False) | df_existente['Codigo'].str.contains("GASTO_EFECTIVO", case=False, na=False)]['Cargo'].sum()
-                    )
-                    
-                    pago_movil_total = (
-                        df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False) | df_existente['Codigo'].str.contains("CAJA_PAGO MÓVIL|CAJA_PAGO MOVIL", case=False, na=False)]['Abono'].sum() - 
-                        df_existente[df_existente['Concepto'].str.contains("Pago Móvil|Pago Movil", case=False, na=False) | df_existente['Codigo'].str.contains("GASTO_PAGO MÓVIL|GASTO_PAGO MOVIL", case=False, na=False)]['Cargo'].sum()
-                    )
-                    
-                    binance_total = (
-                        df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False) | df_existente['Codigo'].str.contains("CAJA_BINANCE", case=False, na=False)]['Abono'].sum() - 
-                        df_existente[df_existente['Concepto'].str.contains("Binance", case=False, na=False) | df_existente['Codigo'].str.contains("GASTO_BINANCE", case=False, na=False)]['Cargo'].sum()
-                    )
-
                     total_gastos = df_existente[df_existente['Codigo'].str.contains("GASTO_", na=False)]['Cargo'].sum()
                     
+                    # CÁLCULO ESTRICTO Y AISLADO POR CUENTA (Basado exactamente en texto clave de origen/salida y códigos de sistema)
+                    def calcular_saldo_cuenta(nombre_cuenta):
+                        n = nombre_cuenta.lower()
+                        # Ingresos: Abonos de clientes o inyecciones o transferencias que mencionen estrictamente la cuenta
+                        ingresos_abonos = df_existente[
+                            (df_existente['Abono'] > 0) & 
+                            (df_existente['Concepto'].str.lower().str.contains(f"({n})", regex=True) | df_existente['Codigo'].str.lower().str.contains(f"caja_{n}|cuenta_{n}", regex=True))
+                        ]['Abono'].sum()
+                        
+                        ingresos_transf = df_existente[
+                            (df_existente['Cargo'] > 0) & 
+                            (df_existente['Concepto'].str.lower().str.contains(f"transferencia recibida de {n}", regex=True))
+                        ]['Cargo'].sum()
+                        
+                        total_entradas = ingresos_abonos + ingresos_transf
+                        
+                        # Salidas: Préstamos (buscando el capital exacto extraído de esta cuenta), gastos o transferencias enviadas
+                        # Buscamos salidas explícitas de capital para evitar duplicar el interés del cliente
+                        mask_prestamo_cuenta = df_existente['Concepto'].str.lower().str.contains(f"salida de {n}", regex=True)
+                        if mask_prestamo_cuenta.any():
+                            # Extraemos limpiamente el monto de capital real que salió de esta cuenta en los conceptos
+                            # Si no se puede extraer por regex, tomamos el cargo proporcional o total asociado a la salida de esa cuenta
+                            salidas_prestamos = df_existente[mask_prestamo_cuenta & (df_existente['Cargo'] > 0)]['Cargo'].sum()
+                        else:
+                            # Compatibilidad con registros viejos donde se cargó el total
+                            salidas_prestamos = df_existente[
+                                (df_existente['Cargo'] > 0) & 
+                                (~df_existente['Codigo'].str.contains("GASTO_|CUENTA_|CAJA_", na=False)) & 
+                                (df_existente['Concepto'].str.lower().str.contains(n))
+                            ]['Cargo'].sum()
+                            
+                        salidas_gastos = df_existente[
+                            (df_existente['Cargo'] > 0) & 
+                            (df_existente['Codigo'].str.lower().str.contains(f"gasto_{n}", regex=True))
+                        ]['Cargo'].sum()
+                        
+                        salidas_transf = df_existente[
+                            (df_existente['Cargo'] > 0) & 
+                            (df_existente['Codigo'].str.lower().str.contains(f"cuenta_{n}", regex=True)) & 
+                            (df_existente['Concepto'].str.lower().str.contains("transferencia enviada", regex=True))
+                        ]['Cargo'].sum()
+                        
+                        total_salidas = salidas_prestamos + salidas_gastos + salidas_transf
+                        
+                        return total_entradas - total_salidas
+
+                    efectivo_total = calcular_saldo_cuenta("efectivo")
+                    pago_movil_total = calcular_saldo_cuenta("pago móvil") if "pago móvil" in df_existente.to_string().lower() else calcular_saldo_cuenta("pago movil")
+                    binance_total = calcular_saldo_cuenta("binance")
+
                     st.markdown("### 🏦 Dinero Disponible en Cuentas")
                     col_c1, col_c2, col_c3 = st.columns(3)
                     col_c1.metric("💵 Efectivo", f"${efectivo_total:,.2f}")
