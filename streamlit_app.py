@@ -6,16 +6,12 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Sistema de Cobros y Finanzas", page_icon="💰")
-st.title("Sistema de Gestión Financiera")
+st.title("Sistema de Gestión de Cobros")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Dividimos en tres pestañas: Cliente, Registro de Cobros, y Finanzas / Gastos
-tab_cliente, tab_admin_cobros, tab_finanzas = st.tabs([
-    "Consulta de Cliente", 
-    "Administrador (Cobros)", 
-    "Finanzas y Saldo en la Calle"
-])
+# Solo dos pestañas: una para el cliente y otra unificada para ti (Administrador)
+tab_cliente, tab_admin = st.tabs(["Consulta de Cliente", "Panel de Administrador"])
 
 # ==========================================
 # PESTAÑA 1: CLIENTE
@@ -59,106 +55,103 @@ with tab_cliente:
             st.warning("Por favor ingrese un código válido.")
 
 # ==========================================
-# PESTAÑA 2: ADMINISTRADOR (REGISTRAR COBROS)
+# PESTAÑA 2: ADMINISTRADOR (UNIFICADA)
 # ==========================================
-with tab_admin_cobros:
-    st.write("Área restringida para registrar nuevos movimientos de clientes.")
-    clave_cobros = st.text_input("Contraseña de Administrador:", type="password", key="clave_c")
+with tab_admin:
+    st.write("Área restringida de control y gestión.")
+    clave_admin = st.text_input("Contraseña de Administrador:", type="password", key="clave_admin_unica")
     
-    if clave_cobros == "admin123":
-        st.info("Acceso concedido.")
+    if clave_admin == "admin123":
+        st.success("Acceso concedido al panel de control.")
         
-        tipo_movimiento = st.radio("¿Qué deseas registrar?", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
+        # Sub-secciones o pestañas internas dentro del panel de administrador
+        seccion_admin = st.radio("¿Qué deseas hacer?", ["Registrar Movimientos", "Ver Finanzas y Saldo en la Calle"])
         
-        with st.form("formulario_registro", clear_on_submit=True):
-            nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
-            nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-001)")
-            nuevo_nombre = st.text_input("Nombre del Cliente")
+        st.divider()
+        
+        # ------------------------------------------
+        # SECCIÓN A: REGISTRAR MOVIMIENTOS
+        # ------------------------------------------
+        if seccion_admin == "Registrar Movimientos":
+            st.subheader("Registrar Nuevo Cobro o Préstamo")
+            tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
             
-            if tipo_movimiento == "Registrar Abono / Pago":
-                nuevo_concepto = st.text_input("Concepto", value="Abono a cuenta")
-                monto = st.number_input("Monto del Abono ($)", min_value=0.0, value=0.0)
-                cargo_val = 0.0
-                abono_val = float(monto)
-            else:
-                nuevo_concepto = st.text_input("Concepto", value="Préstamo inicial / Deuda")
-                monto = st.number_input("Monto del Préstamo/Deuda ($)", min_value=0.0, value=0.0)
-                cargo_val = float(monto)
-                abono_val = 0.0
-            
-            boton_guardar = st.form_submit_button("Guardar en el Sistema")
-            
-            if boton_guardar:
-                if nuevo_codigo and nuevo_nombre:
-                    try:
-                        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-                        creds_dict = dict(st.secrets["connections"]["gsheets"])
-                        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-                        client = gspread.authorize(creds)
-                        
-                        spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-                        sheet = client.open_by_url(spreadsheet_url).sheet1
-                        
-                        fila_nueva = [
-                            nueva_fecha.strftime("%Y-%m-%d"),
-                            str(nuevo_codigo).strip(),
-                            nuevo_nombre,
-                            nuevo_concepto,
-                      cargo_val,
-                            abono_val
-                        ]
-                        
-                        sheet.append_row(fila_nueva)
-                        st.success(f"✅ ¡Registrado correctamente para {nuevo_nombre}!")
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
+            with st.form("formulario_registro", clear_on_submit=True):
+                nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
+                nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-001)")
+                nuevo_nombre = st.text_input("Nombre del Cliente")
+                
+                if tipo_movimiento == "Registrar Abono / Pago":
+                    nuevo_concepto = st.text_input("Concepto", value="Abono a cuenta")
+                    monto = st.number_input("Monto del Abono ($)", min_value=0.0, value=0.0)
+                    cargo_val = 0.0
+                    abono_val = float(monto)
                 else:
-                    st.error("⚠️ Por favor, completa el código y el nombre del cliente.")
-    elif clave_cobros != "":
-        st.error("Contraseña incorrecta.")
-
-# ==========================================
-# PESTAÑA 3: FINANZAS (SALDO EN LA CALLE Y GASTOS)
-# ==========================================
-with tab_finanzas:
-    st.write("Panel general de finanzas, saldo total prestado y control de gastos.")
-    clave_finanzas = st.text_input("Contraseña de Administrador:", type="password", key="clave_f")
-    
-    if clave_finanzas == "admin123":
-        st.info("Acceso concedido al panel financiero.")
+                    nuevo_concepto = st.text_input("Concepto", value="Préstamo inicial / Deuda")
+                    monto = st.number_input("Monto del Préstamo/Deuda ($)", min_value=0.0, value=0.0)
+                    cargo_val = float(monto)
+                    abono_val = 0.0
+                
+                boton_guardar = st.form_submit_button("Guardar en el Sistema")
+                
+                if boton_guardar:
+                    if nuevo_codigo and nuevo_nombre:
+                        try:
+                            scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                            creds_dict = dict(st.secrets["connections"]["gsheets"])
+                            creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+                            client = gspread.authorize(creds)
+                            
+                            spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+                            sheet = client.open_by_url(spreadsheet_url).sheet1
+                            
+                            fila_nueva = [
+                                nueva_fecha.strftime("%Y-%m-%d"),
+                                str(nuevo_codigo).strip(),
+                                nuevo_nombre,
+                                nuevo_concepto,
+                                cargo_val,
+                                abono_val
+                            ]
+                            
+                            sheet.append_row(fila_nueva)
+                            st.success(f"✅ ¡Registrado correctamente para {nuevo_nombre}!")
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
+                    else:
+                        st.error("⚠️ Por favor, completa el código y el nombre del cliente.")
         
-        # Leemos los datos actuales de la hoja
-        try:
-            df_finanzas = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
-            
-            # Filtramos para calcular el saldo en la calle (excluyendo la palabra GASTO si la usamos en código o concepto)
-            # Calculamos por cada cliente la diferencia entre sus cargos y sus abonos
-            if not df_finanzas.empty:
-                # Agrupamos por cliente para ver su deuda individual actual
-                resumen_clientes = df_finanzas.groupby(['Codigo', 'Nombre']).agg(
-                    Total_Cargos=('Cargo', 'sum'),
-                    Total_Abonos=('Abono', 'sum')
-                ).reset_index()
+        # ------------------------------------------
+        # SECCIÓN B: FINANZAS Y SALDO EN LA CALLE
+        # ------------------------------------------
+        else:
+            st.subheader("Resumen Financiero General")
+            try:
+                df_finanzas = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
                 
-                resumen_clientes['Saldo_Pendiente'] = resumen_clientes['Total_Cargos'] - resumen_clientes['Total_Abonos']
+                if not df_finanzas.empty:
+                    resumen_clientes = df_finanzas.groupby(['Codigo', 'Nombre']).agg(
+                        Total_Cargos=('Cargo', 'sum'),
+                        Total_Abonos=('Abono', 'sum')
+                    ).reset_index()
+                    
+                    resumen_clientes['Saldo_Pendiente'] = resumen_clientes['Total_Cargos'] - resumen_clientes['Total_Abonos']
+                    
+                    saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
+                    total_recaudado = resumen_clientes['Total_Abonos'].sum()
+                    
+                    col_f1, col_f2 = st.columns(2)
+                    col_f1.metric("💰 Dinero Total en la Calle (Por Cobrar)", f"${saldo_en_la_calle:,.2f}")
+                    col_f2.metric("💵 Total Histórico Recaudado", f"${total_recaudado:,.2f}")
+                    
+                    st.divider()
+                    st.subheader("Estado de Cuenta de Todos los Clientes")
+                    st.dataframe(resumen_clientes[['Codigo', 'Nombre', 'Total_Cargos', 'Total_Abonos', 'Saldo_Pendiente']], use_container_width=True, hide_index=True)
+                else:
+                    st.info("Aún no hay registros en la base de datos.")
+                    
+            except Exception as e:
+                st.error(f"No se pudieron cargar los datos financieros: {e}")
                 
-                # Saldo total en la calle = la suma de los saldos pendientes de todos los clientes
-                saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
-                total_recaudado = resumen_clientes['Total_Abonos'].sum()
-                
-                st.subheader("Resumen General")
-                col_f1, col_f2 = st.columns(2)
-                col_f1.metric("💰 Dinero Total en la Calle (Por Cobrar)", f"${saldo_en_la_calle:,.2f}")
-                col_f2.metric("💵 Total Histórico Recaudado (Abonos)", f"${total_recaudado:,.2f}")
-                
-                st.divider()
-                st.subheader("Estado de Cuenta por Cliente")
-                st.dataframe(resumen_clientes[['Codigo', 'Nombre', 'Total_Cargos', 'Total_Abonos', 'Saldo_Pendiente']], use_container_width=True, hide_index=True)
-            else:
-                st.info("Aún no hay registros en la base de datos.")
-                
-        except Exception as e:
-            st.error(f"No se pudieron cargar los datos financieros: {e}")
-            
-    elif clave_finanzas != "":
+    elif clave_admin != "":
         st.error("Contraseña incorrecta.")
