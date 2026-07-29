@@ -22,14 +22,19 @@ with tab_cliente:
     if st.button("Consultar"):
         if codigo_cliente:
             try:
+                # Intentamos leer con la nueva columna Cuenta
                 df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cuenta', 'Cargo', 'Abono'])
             except:
+                # Si la hoja vieja aún no tiene la columna Cuenta, leemos sin ella y la creamos por defecto
                 df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
                 df['Cuenta'] = "Efectivo"
             
+            # Limpiamos y aseguramos tipos de datos numéricos para evitar errores de resta
             df['Codigo'] = df['Codigo'].astype(str).str.strip()
-            codigo_buscado = str(codigo_cliente).strip()
+            df['Cargo'] = pd.to_numeric(df['Cargo'], errors='coerce').fillna(0.0)
+            df['Abono'] = pd.to_numeric(df['Abono'], errors='coerce').fillna(0.0)
             
+            codigo_buscado = str(codigo_cliente).strip()
             resultado = df[df['Codigo'] == codigo_buscado]
             
             if not resultado.empty:
@@ -69,13 +74,15 @@ with tab_cliente:
                 st.divider()
                 st.subheader("Historial del Crédito Vigente")
                 if not movimientos_ciclo_actual.empty:
-                    st.dataframe(movimientos_ciclo_actual[['Fecha', 'Concepto', 'Cuenta', 'Cargo', 'Abono']], use_container_width=True, hide_index=True)
+                    cols_a_mostrar = [c for c in ['Fecha', 'Concepto', 'Cuenta', 'Cargo', 'Abono'] if c in movimientos_ciclo_actual.columns]
+                    st.dataframe(movimientos_ciclo_actual[cols_a_mostrar], use_container_width=True, hide_index=True)
                 else:
                     st.info("No hay movimientos activos en este ciclo.")
 
                 if not movimientos_historicos.empty:
                     with st.expander("📂 Ver Historial de Créditos Anteriores / Liquidados"):
-                        st.dataframe(movimientos_historicos[['Fecha', 'Concepto', 'Cuenta', 'Cargo', 'Abono']], use_container_width=True, hide_index=True)
+                        cols_hist = [c for c in ['Fecha', 'Concepto', 'Cuenta', 'Cargo', 'Abono'] if c in movimientos_historicos.columns]
+                        st.dataframe(movimientos_historicos[cols_hist], use_container_width=True, hide_index=True)
             else:
                 st.error("Código no encontrado. Por favor verifique e intente nuevamente.")
         else:
@@ -104,22 +111,24 @@ with tab_admin:
         
         try:
             df_existente = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cuenta', 'Cargo', 'Abono'])
-            df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
-            df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
             df_existente['Cuenta'] = df_existente['Cuenta'].astype(str).str.strip().str.title()
-            clientes_unicos = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)].drop_duplicates(subset=['Codigo']).to_dict(orient='records')
-            opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
-        except Exception:
+        except:
             try:
                 df_existente = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
                 df_existente['Cuenta'] = "Efectivo"
-                df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
-                df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
-                clientes_unicos = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)].drop_duplicates(subset=['Codigo']).to_dict(orient='records')
-                opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
             except:
-                opciones_clientes = []
                 df_existente = pd.DataFrame()
+
+        if not df_existente.empty:
+            df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
+            df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
+            df_existente['Cargo'] = pd.to_numeric(df_existente['Cargo'], errors='coerce').fillna(0.0)
+            df_existente['Abono'] = pd.to_numeric(df_existente['Abono'], errors='coerce').fillna(0.0)
+            
+            clientes_unicos = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)].drop_duplicates(subset=['Codigo']).to_dict(orient='records')
+            opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
+        else:
+            opciones_clientes = []
 
         # ------------------------------------------
         # 1. REGISTRAR MOVIMIENTOS
@@ -210,7 +219,6 @@ with tab_admin:
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
                             filas_a_agregar = []
-                            
                             sufijo_prestamo = ""
                             if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
                                 desc_interes_txt = "Sin interés" if opcion_interes == "Sin interés / Monto Directo" else opcion_interes
@@ -226,35 +234,25 @@ with tab_admin:
                                     desc_default = concepto_personalizado if concepto_personalizado else "Abono a cuenta"
                                     filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, cuenta_afectada, 0.0, float(monto_total_deuda)])
                             
-                            else:  # Es Préstamo / Deuda Inicial
+                            else:  # Préstamo
                                 if usar_dos_cuentas:
                                     if capital_base_total <= 0:
                                         st.error("⚠️ Los montos del capital base deben ser mayores a 0.")
                                         st.stop()
-                                    
-                                    # Guardamos en la columna Cargo el CAPITAL EXACTO que sale de la caja (así no descuadra el efectivo restando intereses fantasma)
                                     if monto_c1 > 0:
-                                        desc_c1 = f"Préstamo inicial (Capital: ${float(monto_c1):,.2f}){sufijo_prestamo}"
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c1, c_1, float(monto_c1), 0.0])
-                                    
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Préstamo inicial (Capital: ${float(monto_c1):,.2f}){sufijo_prestamo}", c_1, float(monto_c1), 0.0])
                                     if monto_c2 > 0:
-                                        desc_c2 = f"Préstamo inicial (Capital: ${float(monto_c2):,.2f}){sufijo_prestamo}"
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c2, c_2, float(monto_c2), 0.0])
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Préstamo inicial (Capital: ${float(monto_c2):,.2f}){sufijo_prestamo}", c_2, float(monto_c2), 0.0])
                                     
-                                    # Si hubo interés, agregamos una línea informativa de ganancia/interés para que el cliente siga viendo su deuda total real
                                     if monto_total_deuda > capital_base_total:
                                         interes_generado = monto_total_deuda - capital_base_total
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Aplicación de Interés ({opcion_interes})", cuenta_afectada if not usar_dos_cuentas else c_1, float(interes_generado), 0.0])
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Aplicación de Interés ({opcion_interes})", c_1, float(interes_generado), 0.0])
                                 else:
                                     if monto_base <= 0:
                                         st.error("⚠️ Ingresa un monto válido mayor a 0.")
                                         st.stop()
                                     
-                                    # 1. Salida del Capital real de la caja
-                                    desc_prestamo = f"Préstamo inicial (Capital: ${float(monto_base):,.2f}){sufijo_prestamo}"
-                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_prestamo, cuenta_afectada, float(monto_base), 0.0])
-                                    
-                                    # 2. Si tiene interés, se suma al saldo del cliente pero limpia en caja
+                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Préstamo inicial (Capital: ${float(monto_base):,.2f}){sufijo_prestamo}", cuenta_afectada, float(monto_base), 0.0])
                                     if monto_total_deuda > monto_base:
                                         interes_generado = monto_total_deuda - monto_base
                                         filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Aplicación de Interés ({opcion_interes})", cuenta_afectada, float(interes_generado), 0.0])
@@ -279,7 +277,6 @@ with tab_admin:
                 cuenta_destino_iny = st.selectbox("¿A qué cuenta ingresa el dinero?", ["Efectivo", "Pago Móvil", "Binance"])
                 monto_iny = st.number_input("Monto a inyectar ($)", min_value=0.0, value=0.0)
                 desc_iny = st.text_input("Nota / Descripción")
-                
                 btn_inyectar = st.form_submit_button("Ingresar Dinero a Caja")
                 
                 if btn_inyectar:
@@ -293,8 +290,7 @@ with tab_admin:
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
                             nota_final = desc_iny if desc_iny else "Inyección de capital"
-                            fila_inyeccion = [fecha_inyeccion.strftime("%Y-%m-%d"), f"CAJA_{cuenta_destino_iny.upper()}", "Inyección de Capital", nota_final, cuenta_destino_iny, 0.0, float(monto_iny)]
-                            sheet.append_row(fila_inyeccion)
+                            sheet.append_row([fecha_inyeccion.strftime("%Y-%m-%d"), f"CAJA_{cuenta_destino_iny.upper()}", "Inyección de Capital", nota_final, cuenta_destino_iny, 0.0, float(monto_iny)])
                             st.success(f"✅ ¡Inyección aplicada con éxito!")
                             st.rerun()
                         except Exception as e:
@@ -389,7 +385,7 @@ with tab_admin:
                 st.info("No hay clientes.")
 
         # ------------------------------------------
-        # 6. FLUJO DE CAJA Y CUENTAS (CÁLCULO EXACTO)
+        # 6. FLUJO DE CAJA Y CUENTAS
         # ------------------------------------------
         else:
             st.subheader("💰 Flujo de Caja y Saldo en Cuentas")
@@ -410,16 +406,10 @@ with tab_admin:
                     def calcular_saldo_exacto(nombre_cuenta):
                         nc = nombre_cuenta.lower()
                         df_c = df_existente[df_existente['Cuenta'].str.lower() == nc]
-                        
                         if df_c.empty:
                             return 0.0
-                        
-                        # Suma todo lo que entra (abonos de clientes, inyecciones de dinero, transferencias recibidas)
                         total_entradas = df_c['Abono'].sum()
-                        
-                        # Suma todo lo que sale (cargos registrados en esta cuenta: capital de préstamos, gastos, transferencias enviadas)
                         total_salidas = df_c['Cargo'].sum()
-                        
                         return total_entradas - total_salidas
 
                     efectivo_total = calcular_saldo_exacto("Efectivo")
