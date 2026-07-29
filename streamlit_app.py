@@ -6,16 +6,13 @@ from datetime import datetime
 st.set_page_config(page_title="Gestión de Cobros", page_icon="💰")
 st.title("Sistema de Cobros y Pagos")
 
-# Conectar con la Hoja Maestra de Google Sheets
-url_hoja = "https://docs.google.com/spreadsheets/d/1S_Cs4B9d3HcSoYN0_28YUZHe6txGUsJwq3TwFzJsPiY/edit?usp=sharing"
+# Conectar usando los secretos configurados en Streamlit
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# MANTENEMOS TODAS LAS OPCIONES ANTERIORES: 
-# Creamos dos pestañas para no sobreescribir ni quitar la consulta del cliente
 tab_cliente, tab_admin = st.tabs(["Consulta de Cliente", "Administrador (Registrar Movimiento)"])
 
 # ==========================================
-# PESTAÑA 1: LO QUE VE EL CLIENTE (INTACTO)
+# PESTAÑA 1: CLIENTE
 # ==========================================
 with tab_cliente:
     st.write("Por favor, ingrese su código único para ver su estado de cuenta y movimientos.")
@@ -23,7 +20,7 @@ with tab_cliente:
 
     if st.button("Consultar"):
         if codigo_cliente:
-            df = conn.read(spreadsheet=url_hoja)
+            df = conn.read(ttl=0) # Lee los datos frescos sin caché
             df['Codigo'] = df['Codigo'].astype(str)
             resultado = df[df['Codigo'] == str(codigo_cliente)]
             
@@ -53,18 +50,15 @@ with tab_cliente:
             st.warning("Por favor ingrese un código válido.")
 
 # ==========================================
-# PESTAÑA 2: LO QUE VES TÚ (NUEVO REGISTRO)
+# PESTAÑA 2: ADMINISTRADOR
 # ==========================================
 with tab_admin:
     st.write("Área restringida para registrar nuevos cobros o pagos en la base de datos.")
     clave = st.text_input("Contraseña de Administrador:", type="password")
     
-    # Protegemos el formulario con una clave sencilla (puedes cambiar "admin123")
     if clave == "admin123":
         st.info("Acceso concedido. Completa los datos para registrar un movimiento.")
         
-        # Usamos clear_on_submit=True SOLO para limpiar estos campos de texto después de guardar, 
-        # sin afectar para nada el historial de consulta ni la pestaña del cliente.
         with st.form("formulario_registro", clear_on_submit=True):
             nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
             nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-001)")
@@ -79,10 +73,10 @@ with tab_admin:
             
             if boton_guardar:
                 if nuevo_codigo and nuevo_nombre and nuevo_concepto:
-                    # 1. Leemos la base de datos actual
-                    df_actual = conn.read(spreadsheet=url_hoja)
+                    # 1. Leemos los datos actuales
+                    df_actual = conn.read(ttl=0)
                     
-                    # 2. Creamos la nueva fila con los datos ingresados
+                    # 2. Creamos la nueva fila
                     nuevo_registro = pd.DataFrame([{
                         "Fecha": nueva_fecha.strftime("%Y-%m-%d"),
                         "Codigo": nuevo_codigo,
@@ -92,11 +86,11 @@ with tab_admin:
                         "Abono": float(nuevo_abono)
                     }])
                     
-                    # 3. Añadimos la nueva fila al final de los datos existentes
+                    # 3. Concatenamos
                     df_actualizado = pd.concat([df_actual, nuevo_registro], ignore_index=True)
                     
-                    # 4. Actualizamos el Google Sheet (esto reemplaza la necesidad de hacerlo manual)
-                    conn.update(spreadsheet=url_hoja, data=df_actualizado)
+                    # 4. Actualizamos Google Sheets usando la API de servicio autorizada
+                    conn.update(data=df_actualizado)
                     
                     st.success(f"✅ ¡Movimiento registrado exitosamente para {nuevo_nombre}!")
                 else:
