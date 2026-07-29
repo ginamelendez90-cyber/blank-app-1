@@ -21,7 +21,11 @@ with tab_cliente:
 
     if st.button("Consultar"):
         if codigo_cliente:
-            df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
+            try:
+                df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cuenta', 'Cargo', 'Abono'])
+            except:
+                df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
+                df['Cuenta'] = "Efectivo"
             
             df['Codigo'] = df['Codigo'].astype(str).str.strip()
             codigo_buscado = str(codigo_cliente).strip()
@@ -65,13 +69,13 @@ with tab_cliente:
                 st.divider()
                 st.subheader("Historial del Crédito Vigente")
                 if not movimientos_ciclo_actual.empty:
-                    st.dataframe(movimientos_ciclo_actual[['Fecha', 'Concepto', 'Cargo', 'Abono']], use_container_width=True, hide_index=True)
+                    st.dataframe(movimientos_ciclo_actual[['Fecha', 'Concepto', 'Cuenta', 'Cargo', 'Abono']], use_container_width=True, hide_index=True)
                 else:
                     st.info("No hay movimientos activos en este ciclo.")
 
                 if not movimientos_historicos.empty:
                     with st.expander("📂 Ver Historial de Créditos Anteriores / Liquidados"):
-                        st.dataframe(movimientos_historicos[['Fecha', 'Concepto', 'Cargo', 'Abono']], use_container_width=True, hide_index=True)
+                        st.dataframe(movimientos_historicos[['Fecha', 'Concepto', 'Cuenta', 'Cargo', 'Abono']], use_container_width=True, hide_index=True)
             else:
                 st.error("Código no encontrado. Por favor verifique e intente nuevamente.")
         else:
@@ -99,14 +103,23 @@ with tab_admin:
         st.divider()
         
         try:
-            df_existente = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
+            df_existente = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cuenta', 'Cargo', 'Abono'])
             df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
             df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
+            df_existente['Cuenta'] = df_existente['Cuenta'].astype(str).str.strip().str.title()
             clientes_unicos = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)].drop_duplicates(subset=['Codigo']).to_dict(orient='records')
             opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
         except Exception:
-            opciones_clientes = []
-            df_existente = pd.DataFrame()
+            try:
+                df_existente = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
+                df_existente['Cuenta'] = "Efectivo"
+                df_existente['Codigo'] = df_existente['Codigo'].astype(str).str.strip()
+                df_existente['Nombre'] = df_existente['Nombre'].astype(str).str.strip()
+                clientes_unicos = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)].drop_duplicates(subset=['Codigo']).to_dict(orient='records')
+                opciones_clientes = [f"{c['Codigo']} - {c['Nombre']}" for c in clientes_unicos]
+            except:
+                opciones_clientes = []
+                df_existente = pd.DataFrame()
 
         # ------------------------------------------
         # 1. REGISTRAR MOVIMIENTOS
@@ -206,12 +219,12 @@ with tab_admin:
                             if tipo_movimiento == "Registrar Abono / Pago":
                                 if usar_dos_cuentas:
                                     if monto_c1 > 0:
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Abono a cuenta ({c_1})", 0.0, float(monto_c1)])
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, "Abono a cuenta", c_1, 0.0, float(monto_c1)])
                                     if monto_c2 > 0:
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Abono a cuenta ({c_2})", 0.0, float(monto_c2)])
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, "Abono a cuenta", c_2, 0.0, float(monto_c2)])
                                 else:
-                                    desc_default = concepto_personalizado if concepto_personalizado else f"Abono a cuenta ({cuenta_afectada})"
-                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, 0.0, float(monto_total_deuda)])
+                                    desc_default = concepto_personalizado if concepto_personalizado else "Abono a cuenta"
+                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, cuenta_afectada, 0.0, float(monto_total_deuda)])
                             
                             else:  # Es Préstamo / Deuda Inicial
                                 if usar_dos_cuentas:
@@ -219,24 +232,32 @@ with tab_admin:
                                         st.error("⚠️ Los montos del capital base deben ser mayores a 0.")
                                         st.stop()
                                     
-                                    factor = monto_total_deuda / capital_base_total
-                                    
+                                    # Guardamos en la columna Cargo el CAPITAL EXACTO que sale de la caja (así no descuadra el efectivo restando intereses fantasma)
                                     if monto_c1 > 0:
-                                        cargo_c1 = float(monto_c1) * factor
-                                        desc_c1 = f"Préstamo inicial (Salida de {c_1} - Capital: ${float(monto_c1):,.2f}){sufijo_prestamo}"
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c1, float(cargo_c1), 0.0])
+                                        desc_c1 = f"Préstamo inicial (Capital: ${float(monto_c1):,.2f}){sufijo_prestamo}"
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c1, c_1, float(monto_c1), 0.0])
                                     
                                     if monto_c2 > 0:
-                                        cargo_c2 = float(monto_c2) * factor
-                                        desc_c2 = f"Préstamo inicial (Salida de {c_2} - Capital: ${float(monto_c2):,.2f}){sufijo_prestamo}"
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c2, float(cargo_c2), 0.0])
+                                        desc_c2 = f"Préstamo inicial (Capital: ${float(monto_c2):,.2f}){sufijo_prestamo}"
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_c2, c_2, float(monto_c2), 0.0])
+                                    
+                                    # Si hubo interés, agregamos una línea informativa de ganancia/interés para que el cliente siga viendo su deuda total real
+                                    if monto_total_deuda > capital_base_total:
+                                        interes_generado = monto_total_deuda - capital_base_total
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Aplicación de Interés ({opcion_interes})", cuenta_afectada if not usar_dos_cuentas else c_1, float(interes_generado), 0.0])
                                 else:
-                                    if monto_total_deuda <= 0:
+                                    if monto_base <= 0:
                                         st.error("⚠️ Ingresa un monto válido mayor a 0.")
                                         st.stop()
                                     
-                                    desc_prestamo = f"Préstamo inicial (Salida de {cuenta_afectada} - Capital: ${float(monto_base):,.2f}){sufijo_prestamo}"
-                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_prestamo, float(monto_total_deuda), 0.0])
+                                    # 1. Salida del Capital real de la caja
+                                    desc_prestamo = f"Préstamo inicial (Capital: ${float(monto_base):,.2f}){sufijo_prestamo}"
+                                    filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_prestamo, cuenta_afectada, float(monto_base), 0.0])
+                                    
+                                    # 2. Si tiene interés, se suma al saldo del cliente pero limpia en caja
+                                    if monto_total_deuda > monto_base:
+                                        interes_generado = monto_total_deuda - monto_base
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"Aplicación de Interés ({opcion_interes})", cuenta_afectada, float(interes_generado), 0.0])
                             
                             for fila in filas_a_agregar:
                                 sheet.append_row(fila)
@@ -271,8 +292,8 @@ with tab_admin:
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
-                            nota_final = desc_iny if desc_iny else f"Inyección de capital ({cuenta_destino_iny})"
-                            fila_inyeccion = [fecha_inyeccion.strftime("%Y-%m-%d"), f"CAJA_{cuenta_destino_iny.upper()}", f"Inyección de Capital ({cuenta_destino_iny})", nota_final, 0.0, float(monto_iny)]
+                            nota_final = desc_iny if desc_iny else "Inyección de capital"
+                            fila_inyeccion = [fecha_inyeccion.strftime("%Y-%m-%d"), f"CAJA_{cuenta_destino_iny.upper()}", "Inyección de Capital", nota_final, cuenta_destino_iny, 0.0, float(monto_iny)]
                             sheet.append_row(fila_inyeccion)
                             st.success(f"✅ ¡Inyección aplicada con éxito!")
                             st.rerun()
@@ -305,8 +326,8 @@ with tab_admin:
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
-                            sheet.append_row([fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_origen.upper()}", f"Sistema ({cuenta_origen})", f"Transferencia enviada a {cuenta_destino}", float(monto_trans), 0.0])
-                            sheet.append_row([fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_destino.upper()}", f"Sistema ({cuenta_destino})", f"Transferencia recibida de {cuenta_origen}", 0.0, float(monto_trans)])
+                            sheet.append_row([fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_origen.upper()}", f"Transferencia enviada a {cuenta_destino}", cuenta_origen, float(monto_trans), 0.0])
+                            sheet.append_row([fecha_trans.strftime("%Y-%m-%d"), f"CUENTA_{cuenta_destino.upper()}", f"Transferencia recibida de {cuenta_origen}", cuenta_destino, 0.0, float(monto_trans)])
                             st.success("✅ ¡Transferencia exitosa!")
                             st.rerun()
                         except Exception as e:
@@ -334,7 +355,7 @@ with tab_admin:
                             spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                             sheet = client.open_by_url(spreadsheet_url).sheet1
                             
-                            sheet.append_row([fecha_gasto.strftime("%Y-%m-%d"), f"GASTO_{cuenta_gasto.upper()}", f"Gastos del Negocio ({cuenta_gasto})", desc_gasto, float(monto_gasto), 0.0])
+                            sheet.append_row([fecha_gasto.strftime("%Y-%m-%d"), f"GASTO_{cuenta_gasto.upper()}", desc_gasto, cuenta_gasto, float(monto_gasto), 0.0])
                             st.success("✅ ¡Gasto registrado!")
                             st.rerun()
                         except Exception as e:
@@ -359,7 +380,7 @@ with tab_admin:
                         spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                         sheet = client.open_by_url(spreadsheet_url).sheet1
                         
-                        sheet.append_row([datetime.now().strftime("%Y-%m-%d"), str(codigo_liq).strip(), nombre_liq, "Crédito anterior liquidado / Inicio nuevo ciclo", 0.0, 0.0])
+                        sheet.append_row([datetime.now().strftime("%Y-%m-%d"), str(codigo_liq).strip(), nombre_liq, "Crédito anterior liquidado / Inicio nuevo ciclo", "Efectivo", 0.0, 0.0])
                         st.success("✅ ¡Crédito liquidado!")
                         st.rerun()
                     except Exception as e:
@@ -368,7 +389,7 @@ with tab_admin:
                 st.info("No hay clientes.")
 
         # ------------------------------------------
-        # 6. FLUJO DE CAJA Y CUENTAS
+        # 6. FLUJO DE CAJA Y CUENTAS (CÁLCULO EXACTO)
         # ------------------------------------------
         else:
             st.subheader("💰 Flujo de Caja y Saldo en Cuentas")
@@ -386,54 +407,24 @@ with tab_admin:
                     total_abonos_general = df_existente['Abono'].sum()
                     total_gastos = df_existente[df_existente['Codigo'].str.contains("GASTO_", na=False)]['Cargo'].sum()
                     
-                    def calcular_saldo_cuenta(nombre_cuenta):
-                        n = nombre_cuenta.lower()
-                        ingresos_abonos = df_existente[
-                            (df_existente['Abono'] > 0) & 
-                            (df_existente['Concepto'].str.lower().str.contains(f"({n})", regex=True) | df_existente['Codigo'].str.lower().str.contains(f"caja_{n}|cuenta_{n}", regex=True))
-                        ]['Abono'].sum()
+                    def calcular_saldo_exacto(nombre_cuenta):
+                        nc = nombre_cuenta.lower()
+                        df_c = df_existente[df_existente['Cuenta'].str.lower() == nc]
                         
-                        ingresos_transf = df_existente[
-                            (df_existente['Cargo'] > 0) & 
-                            (df_existente['Concepto'].str.lower().str.contains(f"transferencia recibida de {n}", regex=True))
-                        ]['Cargo'].sum()
+                        if df_c.empty:
+                            return 0.0
                         
-                        total_entradas = ingresos_abonos + ingresos_transf
+                        # Suma todo lo que entra (abonos de clientes, inyecciones de dinero, transferencias recibidas)
+                        total_entradas = df_c['Abono'].sum()
                         
-                        mask_cuenta = df_existente['Concepto'].str.lower().str.contains(f"salida de {n}", regex=True)
-                        if mask_cuenta.any():
-                            sub_df = df_existente[mask_cuenta]
-                            salidas_prestamos = 0.0
-                            for _, row_item in sub_df.iterrows():
-                                texto_c = str(row_item['Concepto'])
-                                if "capital: $" in texto_c.lower():
-                                    try:
-                                        part = texto_c.lower().split("capital: $")[1].split(" ")[0].replace(",", "")
-                                        salidas_prestamos += float(part)
-                                    except:
-                                        salidas_prestamos += float(row_item['Cargo'])
-                                else:
-                                    salidas_prestamos += float(row_item['Cargo'])
-                        else:
-                            salidas_prestamos = 0.0
-
-                        salidas_gastos = df_existente[
-                            (df_existente['Cargo'] > 0) & 
-                            (df_existente['Codigo'].str.lower().str.contains(f"gasto_{n}", regex=True))
-                        ]['Cargo'].sum()
+                        # Suma todo lo que sale (cargos registrados en esta cuenta: capital de préstamos, gastos, transferencias enviadas)
+                        total_salidas = df_c['Cargo'].sum()
                         
-                        salidas_transf = df_existente[
-                            (df_existente['Cargo'] > 0) & 
-                            (df_existente['Codigo'].str.lower().str.contains(f"cuenta_{n}", regex=True)) & 
-                            (df_existente['Concepto'].str.lower().str.contains("transferencia enviada", regex=True))
-                        ]['Cargo'].sum()
-                        
-                        total_salidas = salidas_prestamos + salidas_gastos + salidas_transf
                         return total_entradas - total_salidas
 
-                    efectivo_total = calcular_saldo_cuenta("efectivo")
-                    pago_movil_total = calcular_saldo_cuenta("pago móvil") if "pago móvil" in df_existente.to_string().lower() else calcular_saldo_cuenta("pago movil")
-                    binance_total = calcular_saldo_cuenta("binance")
+                    efectivo_total = calcular_saldo_exacto("Efectivo")
+                    pago_movil_total = calcular_saldo_exacto("Pago Móvil")
+                    binance_total = calcular_saldo_exacto("Binance")
 
                     st.markdown("### 🏦 Dinero Disponible en Cuentas")
                     col_c1, col_c2, col_c3 = st.columns(3)
