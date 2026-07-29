@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Gestión de Cobros", page_icon="💰")
 st.title("Sistema de Cobros y Pagos")
@@ -20,10 +22,8 @@ with tab_cliente:
 
     if st.button("Consultar"):
         if codigo_cliente:
-            # Leemos los datos forzando las columnas exactas para evitar errores de nombres
             df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
             
-            # Limpiamos espacios y convertimos a texto el código para buscar sin fallos
             df['Codigo'] = df['Codigo'].astype(str).str.strip()
             codigo_buscado = str(codigo_cliente).strip()
             
@@ -78,26 +78,33 @@ with tab_admin:
             
             if boton_guardar:
                 if nuevo_codigo and nuevo_nombre and nuevo_concepto:
-                    # Preparamos la fila exacta en formato de lista o dataframe individual
-                    nuevo_registro = pd.DataFrame([{
-                        "Fecha": nueva_fecha.strftime("%Y-%m-%d"),
-                        "Codigo": str(nuevo_codigo).strip(),
-                        "Nombre": nuevo_nombre,
-                        "Concepto": nuevo_concepto,
-                        "Cargo": float(nuevo_cargo),
-                        "Abono": float(nuevo_abono)
-                    }])
-                    
-                    # Leemos lo actual, concatenamos y usamos un bloque protegido
-                    df_actual = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
-                    df_actualizado = pd.concat([df_actual, nuevo_registro], ignore_index=True)
-                    
                     try:
-                        # Forzamos la actualización especificando la worksheet principal
-                        conn.update(worksheet="Sheet1", data=df_actualizado)
+                        # Autenticación directa con gspread usando los secretos de Streamlit
+                        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                        creds_dict = dict(st.secrets["connections"]["gsheets"])
+                        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+                        client = gspread.authorize(creds)
+                        
+                        # Abrir la hoja por la URL configurada en los secretos
+                        spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+                        sheet = client.open_by_url(spreadsheet_url).sheet1
+                        
+                        # Preparar la fila exacta
+                        fila_nueva = [
+                            nueva_fecha.strftime("%Y-%m-%d"),
+                            str(nuevo_codigo).strip(),
+                            nuevo_nombre,
+                            nuevo_concepto,
+                            float(nuevo_cargo),
+                            float(nuevo_abono)
+                        ]
+                        
+                        # Agregar la fila al final de la hoja de forma limpia y directa
+                        sheet.append_row(fila_nueva)
+                        
                         st.success(f"✅ ¡Movimiento registrado exitosamente para {nuevo_nombre}!")
                     except Exception as e:
-                        st.error(f"Error al guardar en Google Sheets. Asegúrate de que la pestaña se llame 'Sheet1'. Detalle: {e}")
+                        st.error(f"Error al guardar: {e}")
                 else:
                     st.error("⚠️ Por favor, completa el código, nombre y concepto.")
     elif clave != "":
