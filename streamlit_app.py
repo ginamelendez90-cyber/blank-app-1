@@ -139,19 +139,55 @@ with tab_admin:
             with st.form("formulario_registro"):
                 nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
                 
+                # Configuración específica si es Préstamo
+                tasa_interes_seleccionada = None
+                plazo_dias = None
+                
+                if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
+                    st.markdown("##### ⚙️ Configuración del Préstamo (Interés y Plazo)")
+                    opcion_interes = st.radio("Selecciona la tasa de interés:", ["Sin interés / Monto Directo", "15% de Interés", "20% de Interés"], horizontal=True)
+                    plazo_dias = st.number_input("Plazo del préstamo (en días):", min_value=1, value=30, step=1)
+                
                 if usar_dos_cuentas:
                     st.markdown("##### Distribución del monto entre 2 cuentas:")
                     c_1 = st.selectbox("Primera Cuenta", ["Efectivo", "Pago Móvil", "Binance"], key="c1")
-                    monto_c1 = st.number_input(f"Monto correspondiente al {c_1} ($)", min_value=0.0, value=0.0, key="mc1")
+                    monto_c1 = st.number_input(f"Monto base correspondiente al {c_1} ($)", min_value=0.0, value=0.0, key="mc1")
                     
                     otras_cuentas = [c for c in ["Efectivo", "Pago Móvil", "Binance"] if c != c_1]
                     c_2 = st.selectbox("Segunda Cuenta", otras_cuentas, key="c2")
-                    monto_c2 = st.number_input(f"Monto correspondiente al {c_2} ($)", min_value=0.0, value=0.0, key="mc2")
+                    monto_c2 = st.number_input(f"Monto base correspondiente al {c_2} ($)", min_value=0.0, value=0.0, key="mc2")
                     
-                    monto_total_calculado = monto_c1 + monto_c2
-                    st.info(f"💵 Monto Total del Movimiento: **${monto_total_calculado:,.2f}**")
+                    monto_base_calculado = monto_c1 + monto_c2
+                    
+                    # Aplicar cálculo de interés si es préstamo
+                    if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
+                        if opcion_interes == "15% de Interés":
+                            monto_total_calculado = monto_base_calculado * 1.15
+                            st.info(f"💵 Capital Base: ${monto_base_calculado:,.2f} + 15% Interés = **Total a Deber: ${monto_total_calculado:,.2f}** (Plazo: {plazo_dias} días)")
+                        elif opcion_interes == "20% de Interés":
+                            monto_total_calculado = monto_base_calculado * 1.20
+                            st.info(f"💵 Capital Base: ${monto_base_calculado:,.2f} + 20% Interés = **Total a Deber: ${monto_total_calculado:,.2f}** (Plazo: {plazo_dias} días)")
+                        else:
+                            monto_total_calculado = monto_base_calculado
+                            st.info(f"💵 Monto Total del Movimiento: **${monto_total_calculado:,.2f}** (Plazo: {plazo_dias} días)")
+                    else:
+                        monto_total_calculado = monto_base_calculado
+                        st.info(f"💵 Monto Total del Movimiento: **${monto_total_calculado:,.2f}**")
                 else:
-                    monto = st.number_input("Monto ($)", min_value=0.0, value=0.0)
+                    monto_base = st.number_input("Monto base del préstamo / pago ($)", min_value=0.0, value=0.0)
+                    
+                    if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
+                        if opcion_interes == "15% de Interés":
+                            monto = monto_base * 1.15
+                            st.info(f"💡 Aplicando 15%: Capital (${monto_base:,.2f}) + Interés = **Total a Deber: ${monto:,.2f}** | Plazo: {plazo_dias} días")
+                        elif opcion_interes == "20% de Interés":
+                            monto = monto_base * 1.20
+                            st.info(f"💡 Aplicando 20%: Capital (${monto_base:,.2f}) + Interés = **Total a Deber: ${monto:,.2f}** | Plazo: {plazo_dias} días")
+                        else:
+                            monto = monto_base
+                            st.info(f"💡 Monto total: **${monto:,.2f}** | Plazo: {plazo_dias} días")
+                    else:
+                        monto = monto_base
                 
                 concepto_personalizado = st.text_input("Concepto / Nota adicional (Opcional)", value="")
                 
@@ -170,12 +206,26 @@ with tab_admin:
                             
                             filas_a_agregar = []
                             
+                            # Armar descripción del préstamo incluyendo plazo e interés si aplica
+                            sufijo_prestamo = ""
+                            if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
+                                desc_interes_txt = "Sin interés" if opcion_interes == "Sin interés / Monto Directo" else opcion_interes
+                                sufijo_prestamo = f" [Plazo: {plazo_dias} días | {desc_interes_txt}]"
+                            
                             if usar_dos_cuentas:
                                 if monto_total_calculado <= 0:
                                     st.error("⚠️ Los montos combinados deben ser mayores a 0.")
                                     st.stop()
                                     
-                                desc_base = concepto_personalizado if concepto_personalizado else ("Préstamo inicial" if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else "Abono a cuenta")
+                                desc_base = concepto_personalizado if concepto_personalizado else ("Préstamo inicial" + sufijo_prestamo if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else "Abono a cuenta")
+                                
+                                # Si es préstamo con interés usando dos cuentas, distribuimos el interés proporcionalmente al monto base
+                                factor_proporcional = 1.0
+                                if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" and monto_base_calculado > 0:
+                                    factor_proporcional = monto_total_calculado / monto_base_calculado
+                                    
+                                m1_final = float(monto_c1) * factor_proporcional
+                                m2_final = float(monto_c2) * factor_proporcional
                                 
                                 if tipo_movimiento == "Registrar Abono / Pago":
                                     if monto_c1 > 0:
@@ -184,15 +234,15 @@ with tab_admin:
                                         filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} ({c_2})", 0.0, float(monto_c2)])
                                 else:
                                     if monto_c1 > 0:
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_1})", float(monto_c1), 0.0])
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_1})", float(m1_final), 0.0])
                                     if monto_c2 > 0:
-                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_2})", float(monto_c2), 0.0])
+                                        filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {c_2})", float(m2_final), 0.0])
                             else:
                                 if monto <= 0:
                                     st.error("⚠️ Ingresa un monto válido mayor a 0.")
                                     st.stop()
                                     
-                                desc_default = concepto_personalizado if concepto_personalizado else (f"Préstamo inicial (Salida de {cuenta_afectada})" if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else f"Abono a cuenta ({cuenta_afectada})")
+                                desc_default = concepto_personalizado if concepto_personalizado else (f"Préstamo inicial (Salida de {cuenta_afectada}){sufijo_prestamo}" if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else f"Abono a cuenta ({cuenta_afectada})")
                                 
                                 if tipo_movimiento == "Registrar Abono / Pago":
                                     filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, desc_default, 0.0, float(monto)])
@@ -393,7 +443,6 @@ with tab_admin:
                     
                     total_abonos_general = df_existente['Abono'].sum()
                     
-                    # Filtros mejorados que integran de forma exacta: Abonos, Inyecciones, Transferencias, Gastos y Préstamos por cuenta
                     efectivo_total = (
                         df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False) | df_existente['Codigo'].str.contains("CAJA_EFECTIVO", case=False, na=False)]['Abono'].sum() - 
                         df_existente[df_existente['Concepto'].str.contains("Efectivo", case=False, na=False) | df_existente['Codigo'].str.contains("GASTO_EFECTIVO", case=False, na=False)]['Cargo'].sum()
