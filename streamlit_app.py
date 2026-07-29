@@ -53,7 +53,7 @@ with tab_cliente:
                 prestamo_actual = movimientos_ciclo_actual['Cargo'].sum()
                 pagos_actual = movimientos_ciclo_actual['Abono'].sum()
                 
-                # Forzar a que el saldo no baje de 0
+                # Protección para evitar saldos negativos
                 saldo_pendiente = max(0.0, prestamo_actual - pagos_actual)
 
                 st.subheader(f"Cliente: {nombre}")
@@ -406,7 +406,7 @@ with tab_admin:
                         cargos_ciclo = movs_ciclo['Cargo'].sum()
                         abonos_ciclo = movs_ciclo['Abono'].sum()
                         
-                        # Saldo pendiente real protegido contra negativos
+                        # Saldo pendiente real protegido de negativos
                         saldo_actual_cli = max(0.0, cargos_ciclo - abonos_ciclo)
                         
                         lista_resumen_clientes.append({
@@ -452,7 +452,6 @@ with tab_admin:
                     
                     st.divider()
                     st.subheader("Estado de Cuenta de Clientes")
-                    # Corrección en el orden y nombres de columnas de visualización del DataFrame
                     st.dataframe(resumen_clientes[['Codigo', 'Nombre', 'Total_Cargos', 'Total_Abonos', 'Saldo_Pendiente']], use_container_width=True, hide_index=True)
                 else:
                     st.info("Aún no hay registros.")
