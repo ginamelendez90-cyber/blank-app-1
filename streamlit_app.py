@@ -33,38 +33,32 @@ with tab_cliente:
                 
                 nombre = resultado.iloc[0]['Nombre']
                 
-                # Cálculos globales e individuales
+                # Cálculos globales históricos
                 total_cargos_historico = resultado['Cargo'].sum()
                 total_pagos_historico = resultado['Abono'].sum()
                 
-                # Detectar el último préstamo actual (buscando desde el último cargo registrado)
-                cargos_df = resultado[resultado['Cargo'] > 0]
-                if not cargos_df.empty:
-                    # Tomamos el último préstamo otorgado como el "actual"
-                    idx_ultimo_prestamo = cargos_df.index[-1]
-                    movimientos_ciclo_actual = resultado.loc[resultado.index >= idx_ultimo_prestamo]
-                    
-                    prestamo_actual = movimientos_ciclo_actual['Cargo'].sum()
-                    pagos_actual = movimientos_ciclo_actual['Abono'].sum()
-                    saldo_pendiente = prestamo_actual - pagos_actual
-                    
-                    # Movimientos anteriores (historial archivado del cliente)
-                    movimientos_historicos = resultado.loc[resultado.index < idx_ultimo_prestamo]
+                # Detectar si hay un punto de liquidación o corte anterior
+                indices_liquidacion = resultado[resultado['Concepto'].str.contains("Crédito anterior liquidado", case=False, na=False)].index
+                
+                if not indices_liquidacion.empty:
+                    ultimo_corte_idx = indices_liquidacion[-1]
+                    movimientos_ciclo_actual = resultado.loc[resultado.index > ultimo_corte_idx]
+                    movimientos_historicos = resultado.loc[resultado.index <= ultimo_corte_idx]
                 else:
-                    prestamo_actual = total_cargos_historico
-                    pagos_actual = total_pagos_historico
-                    saldo_pendiente = prestamo_actual - pagos_actual
+                    movimientos_ciclo_actual = resultado
                     movimientos_historicos = pd.DataFrame()
+                
+                prestamo_actual = movimientos_ciclo_actual['Cargo'].sum()
+                pagos_actual = movimientos_ciclo_actual['Abono'].sum()
+                saldo_pendiente = prestamo_actual - pagos_actual
 
                 st.subheader(f"Cliente: {nombre}")
                 
-                # Métricas principales del crédito actual
                 col1, col2, col3 = st.columns(3)
                 col1.metric("📌 Préstamo Actual", f"${prestamo_actual:,.2f}")
                 col2.metric("💵 Abonado (Actual)", f"${pagos_actual:,.2f}")
                 col3.metric("⚠️ Saldo Pendiente", f"${saldo_pendiente:,.2f}")
                 
-                # Saldo total prestado histórico en pequeño y bien organizado
                 st.markdown(
                     f"<p style='color: gray; font-size: 14px; margin-bottom: 20px;'>"
                     f"<i>📊 Acumulado histórico total prestado: ${total_cargos_historico:,.2f}</i>"
@@ -79,7 +73,7 @@ with tab_cliente:
                 else:
                     st.info("No hay movimientos activos en este ciclo.")
 
-                # Apartado de Historial de Créditos Anteriores (si existen)
+                # Apartado de Historial de Créditos Anteriores
                 if not movimientos_historicos.empty:
                     with st.expander("📂 Ver Historial de Créditos Anteriores / Liquidados"):
                         st.write("Movimientos de préstamos y pagos de ciclos pasados ya saldados:")
@@ -99,7 +93,11 @@ with tab_admin:
     if clave_admin == "admin123":
         st.success("Acceso concedido al panel de control.")
         
-        seccion_admin = st.radio("¿Qué deseas hacer?", ["Registrar Movimientos", "Ver Finanzas y Saldo en la Calle"])
+        seccion_admin = st.radio("¿Qué deseas hacer?", [
+            "Registrar Movimientos", 
+            "Liquidar / Cerrar Crédito Actual", 
+            "Ver Finanzas y Saldo en la Calle"
+        ])
         
         st.divider()
         
@@ -119,15 +117,15 @@ with tab_admin:
             st.subheader("Registrar Nuevo Cobro o Préstamo")
             
             tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
-            es_nuevo_cliente = st.checkbox("➕ Registrar como cliente NUEVO (o Nuevo Ciclo con otro código)")
+            es_nuevo_cliente = st.checkbox("➕ Registrar como cliente NUEVO")
             
             if not es_nuevo_cliente and opciones_clientes:
                 cliente_seleccionado = st.selectbox("Selecciona al Cliente Existente:", opciones_clientes)
                 nuevo_codigo = cliente_seleccionado.split(" - ")[0]
                 nuevo_nombre = cliente_seleccionado.split(" - ")[1]
             else:
-                st.info("Ingresa los datos (si es un nuevo ciclo, puedes usar el mismo nombre pero cambiando el código, ej: CLI-001-B):")
-                nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-001-B)")
+                st.info("Ingresa los datos del nuevo cliente:")
+                nuevo_codigo = st.text_input("Código del Cliente (Ej. CLI-002)")
                 nuevo_nombre = st.text_input("Nombre del Cliente")
             
             with st.form("formulario_registro"):
@@ -174,7 +172,47 @@ with tab_admin:
                         st.error("⚠️ Por favor, asegúrate de colocar el código y el nombre del cliente.")
 
         # ------------------------------------------
-        # SECCIÓN B: FINANZAS Y SALDO EN LA CALLE
+        # SECCIÓN B: LIQUIDAR / CERRAR CRÉDITO ACTUAL
+        # ------------------------------------------
+        elif seccion_admin == "Liquidar / Cerrar Crédito Actual":
+            st.subheader("Cerrar Ciclo Actual para Nuevo Préstamo")
+            st.write("Usa esta opción cuando el cliente termine de pagar su préstamo. Esto archivará los movimientos viejos en su historial y dejará su cuenta en cero, lista para registrarle un nuevo préstamo.")
+            
+            if opciones_clientes:
+                cliente_a_liquidar = st.selectbox("Selecciona al Cliente a Liquidar:", opciones_clientes, key="liq_cliente")
+                codigo_liq = cliente_a_liquidar.split(" - ")[0]
+                nombre_liq = cliente_a_liquidar.split(" - ")[1]
+                
+                if st.button("✂️ Liquidar Crédito y Abrir Nuevo Ciclo"):
+                    try:
+                        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                        creds_dict = dict(st.secrets["connections"]["gsheets"])
+                        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+                        client = gspread.authorize(creds)
+                        
+                        spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+                        sheet = client.open_by_url(spreadsheet_url).sheet1
+                        
+                        # Agregamos una fila de corte que divide el ciclo viejo del nuevo
+                        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+                        fila_corte = [
+                            fecha_hoy,
+                            str(codigo_liq).strip(),
+                            nombre_liq,
+                            "Crédito anterior liquidado / Inicio nuevo ciclo",
+                            0.0,
+                            0.0
+                        ]
+                        
+                        sheet.append_row(fila_corte)
+                        st.success(f"✅ ¡Crédito liquidado con éxito para {nombre_liq}! Ya puedes ir a 'Registrar Movimientos' y ponerle su nuevo préstamo.")
+                    except Exception as e:
+                        st.error(f"Error al liquidar el crédito: {e}")
+            else:
+                st.info("No hay clientes registrados en el sistema.")
+
+        # ------------------------------------------
+        # SECCIÓN C: FINANZAS Y SALDO EN LA CALLE
         # ------------------------------------------
         else:
             st.subheader("Resumen Financiero General")
@@ -197,7 +235,7 @@ with tab_admin:
                     col_f2.metric("💵 Total Histórico Recaudado", f"${total_recaudado:,.2f}")
                     
                     st.divider()
-                    st.subheader("Estado de Cuenta de Todos los Clientes (Por Código)")
+                    st.subheader("Estado de Cuenta de Todos los Clientes")
                     st.dataframe(resumen_clientes[['Codigo', 'Nombre', 'Total_Cargos', 'Total_Abonos', 'Saldo_Pendiente']], use_container_width=True, hide_index=True)
                 else:
                     st.info("Aún no hay registros en la base de datos.")
