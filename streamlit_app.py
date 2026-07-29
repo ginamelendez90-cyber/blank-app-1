@@ -90,6 +90,7 @@ with tab_admin:
         
         seccion_admin = st.radio("¿Qué deseas hacer?", [
             "Registrar Movimientos", 
+            "Inyectar Dinero / Alimentar Caja", 
             "Transferir entre Cuentas", 
             "Registrar Gasto", 
             "Liquidar / Cerrar Crédito", 
@@ -109,14 +110,13 @@ with tab_admin:
             df_existente = pd.DataFrame()
 
         # ------------------------------------------
-        # 1. REGISTRAR MOVIMIENTOS (Con opción de dividir cuentas)
+        # 1. REGISTRAR MOVIMIENTOS
         # ------------------------------------------
         if seccion_admin == "Registrar Movimientos":
             st.subheader("Registrar Cobro (Abono) o Préstamo")
             
             tipo_movimiento = st.radio("Tipo de movimiento:", ["Registrar Abono / Pago", "Registrar Préstamo / Deuda Inicial"])
             
-            # Opción para usar cuentas múltiples simultáneamente
             usar_dos_cuentas = st.checkbox("🔀 ¿El dinero sale/entra combinando DOS cuentas al mismo tiempo? (Ej: Efectivo + Binance)")
             
             if not usar_dos_cuentas:
@@ -142,12 +142,11 @@ with tab_admin:
                 if usar_dos_cuentas:
                     st.markdown("##### Distribución del monto entre 2 cuentas:")
                     c_1 = st.selectbox("Primera Cuenta", ["Efectivo", "Pago Móvil", "Binance"], key="c1")
-                    monto_c1 = st.number_input(f"Monto correspondiente a {c_1} ($)", min_value=0.0, value=0.0, key="mc1")
+                    monto_c1 = st.number_input(f"Monto correspondiente al {c_1} ($)", min_value=0.0, value=0.0, key="mc1")
                     
-                    # Filtramos la segunda cuenta para que no sea la misma
                     otras_cuentas = [c for c in ["Efectivo", "Pago Móvil", "Binance"] if c != c_1]
                     c_2 = st.selectbox("Segunda Cuenta", otras_cuentas, key="c2")
-                    monto_c2 = st.number_input(f"Monto correspondiente a {c_2} ($)", min_value=0.0, value=0.0, key="mc2")
+                    monto_c2 = st.number_input(f"Monto correspondiente al {c_2} ($)", min_value=0.0, value=0.0, key="mc2")
                     
                     monto_total_calculado = monto_c1 + monto_c2
                     st.info(f"💵 Monto Total del Movimiento: **${monto_total_calculado:,.2f}**")
@@ -210,7 +209,52 @@ with tab_admin:
                         st.error("⚠️ Por favor, completa el código y el nombre del cliente.")
 
         # ------------------------------------------
-        # 2. TRANSFERIR ENTRE CUENTAS
+        # 2. INYECTAR DINERO / ALIMENTAR CAJA
+        # ------------------------------------------
+        elif seccion_admin == "Inyectar Dinero / Alimentar Caja":
+            st.subheader("Inyectar Dinero / Capital a una Cuenta")
+            st.write("Utiliza esta opción para agregar fondos propios o capital externo a tu Efectivo, Pago Móvil o Binance sin afectar cuentas de clientes.")
+            
+            with st.form("form_inyectar"):
+                fecha_inyeccion = st.date_input("Fecha de inyección", datetime.now())
+                cuenta_destino_iny = st.selectbox("¿A qué cuenta ingresa el dinero?", ["Efectivo", "Pago Móvil", "Binance"])
+                monto_iny = st.number_input("Monto a inyectar ($)", min_value=0.0, value=0.0)
+                desc_iny = st.text_input("Nota / Descripción (Ej. Inyección de capital propio, Apertura de fondo, etc.)")
+                
+                btn_inyectar = st.form_submit_button("Ingresar Dinero a Caja")
+                
+                if btn_inyectar:
+                    if monto_iny > 0:
+                        try:
+                            scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                            creds_dict = dict(st.secrets["connections"]["gsheets"])
+                            creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+                            client = gspread.authorize(creds)
+                            
+                            spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+                            sheet = client.open_by_url(spreadsheet_url).sheet1
+                            
+                            nota_final = desc_iny if desc_iny else f"Inyección de capital ({cuenta_destino_iny})"
+                            
+                            # Se registra como un Abono/Ingreso interno en la cuenta seleccionada
+                            fila_inyeccion = [
+                                fecha_inyeccion.strftime("%Y-%m-%d"),
+                                f"CAJA_{cuenta_destino_iny.upper()}",
+                                f"Inyección de Capital ({cuenta_destino_iny})",
+                                nota_final,
+                                0.0,
+                                float(monto_iny)
+                            ]
+                            
+                            sheet.append_row(fila_inyeccion)
+                            st.success(f"✅ ¡Inyección de ${monto_iny:,.2f} aplicada con éxito a {cuenta_destino_iny}!")
+                        except Exception as e:
+                            st.error(f"Error al inyectar dinero: {e}")
+                    else:
+                        st.error("⚠️ Por favor, ingresa un monto válido mayor a 0.")
+
+        # ------------------------------------------
+        # 3. TRANSFERIR ENTRE CUENTAS
         # ------------------------------------------
         elif seccion_admin == "Transferir entre Cuentas":
             st.subheader("Mover Dinero entre Efectivo, Pago Móvil y Binance")
@@ -249,7 +293,7 @@ with tab_admin:
                             st.error(f"Error al registrar la transferencia: {e}")
 
         # ------------------------------------------
-        # 3. REGISTRAR GASTO
+        # 4. REGISTRAR GASTO
         # ------------------------------------------
         elif seccion_admin == "Registrar Gasto":
             st.subheader("Registrar Salida de Dinero / Gasto")
@@ -290,7 +334,7 @@ with tab_admin:
                         st.error("⚠️ Por favor, ingresa una descripción y un monto válido.")
 
         # ------------------------------------------
-        # 4. LIQUIDAR / CERRAR CRÉDITO ACTUAL
+        # 5. LIQUIDAR / CERRAR CRÉDITO ACTUAL
         # ------------------------------------------
         elif seccion_admin == "Liquidar / Cerrar Crédito":
             st.subheader("Cerrar Ciclo Actual para Nuevo Préstamo")
@@ -328,13 +372,13 @@ with tab_admin:
                 st.info("No hay clientes registrados.")
 
         # ------------------------------------------
-        # 5. FLUJO DE CAJA Y CUENTAS
+        # 6. FLUJO DE CAJA Y CUENTAS
         # ------------------------------------------
         else:
             st.subheader("💰 Flujo de Caja y Saldo en Cuentas")
             try:
                 if not df_existente.empty:
-                    df_clientes = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_", na=False)]
+                    df_clientes = df_existente[~df_existente['Codigo'].str.contains("CUENTA_|GASTO_|CAJA_", na=False)]
                     
                     resumen_clientes = df_clientes.groupby(['Codigo', 'Nombre']).agg(
                         Total_Cargos=('Cargo', 'sum'),
