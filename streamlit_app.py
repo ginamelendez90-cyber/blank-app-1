@@ -7,7 +7,7 @@ st.set_page_config(page_title="Gestión de Cobros", page_icon="💰")
 st.title("Sistema de Cobros y Pagos")
 
 # Conectar con la Hoja Maestra de Google Sheets
-url_hoja = "https://docs.google.com/spreadsheets/d/TU_ENLACE_AQUI/edit"
+url_hoja = "https://docs.google.com/spreadsheets/d/1S_Cs4B9d3HcSoYN0_28YUZHe6txGUsJwq3TwFzJsPiY/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # MANTENEMOS TODAS LAS OPCIONES ANTERIORES: 
