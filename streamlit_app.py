@@ -609,9 +609,8 @@ with tab_admin:
           except Exception as e:
             st.error(f"Error: {e}")
       else:
-        st.info("No hay clientes.")
 
-    # ------------------------------------------
+          # ------------------------------------------
     # 6. FLUJO DE CAJA Y CUENTAS
     # ------------------------------------------
     else:
@@ -625,46 +624,79 @@ with tab_admin:
           ]
 
           lista_resumen_clientes = []
-          for codigo_cliente_val, grupo_c in df_clientes.groupby("Codigo"):
-            nombre_c = grupo_c.iloc[0]["Nombre"]
-            indices_liq = grupo_c[
-                grupo_c["Concepto"].str.contains(
-                    "Crédito anterior liquidado", case=False, na=False
-                )
-            ].index
+          if not df_clientes.empty and "Codigo" in df_clientes.columns:
+            for codigo_cliente_val, grupo_c in df_clientes.groupby("Codigo"):
+              nombre_c = (
+                  grupo_c.iloc[0]["Nombre"]
+                  if "Nombre" in grupo_c.columns
+                  else "Desconocido"
+              )
+              indices_liq = (
+                  grupo_c[
+                      grupo_c["Concepto"].str.contains(
+                          "Crédito anterior liquidado", case=False, na=False
+                      )
+                  ].index
+                  if "Concepto" in grupo_c.columns
+                  else pd.Index([])
+              )
 
-            if not indices_liq.empty:
-              ultimo_corte = indices_liq[-1]
-              movs_ciclo = grupo_c.loc[grupo_c.index > ultimo_corte]
-            else:
-              movs_ciclo = grupo_c
+              if not indices_liq.empty:
+                ultimo_corte = indices_liq[-1]
+                movs_ciclo = grupo_c.loc[grupo_c.index > ultimo_corte]
+              else:
+                movs_ciclo = grupo_c
 
-            cargos_ciclo = movs_ciclo["Cargo"].sum()
-            abonos_ciclo = movs_ciclo["Abono"].sum()
+              cargos_ciclo = (
+                  movs_ciclo["Cargo"].sum()
+                  if "Cargo" in movs_ciclo.columns
+                  else 0.0
+              )
+              abonos_ciclo = (
+                  movs_ciclo["Abono"].sum()
+                  if "Abono" in movs_ciclo.columns
+                  else 0.0
+              )
 
-            # Saldo pendiente real protegido de negativos
-            saldo_actual_cli = max(0.0, cargos_ciclo - abonos_ciclo)
+              saldo_actual_cli = max(0.0, cargos_ciclo - abonos_ciclo)
 
-            lista_resumen_clientes.append({
-                "Codigo": codigo_cliente_val,
-                "Nombre": nombre_c,
-                "Total_Cargos": cargos_ciclo,
-                "Total_Abonos": abonos_ciclo,
-                "Saldo_Pendiente": saldo_actual_cli,
-            })
+              lista_resumen_clientes.append({
+                  "Codigo": codigo_cliente_val,
+                  "Nombre": nombre_c,
+                  "Total_Cargos": cargos_ciclo,
+                  "Total_Abonos": abonos_ciclo,
+                  "Saldo_Pendiente": saldo_actual_cli,
+              })
 
           resumen_clientes = pd.DataFrame(lista_resumen_clientes)
 
-          # Suma de la calle protegida
-          saldo_en_la_calle = resumen_clientes["Saldo_Pendiente"].sum()
+          if not resumen_clientes.empty and "Saldo_Pendiente" in resumen_clientes.columns:
+            saldo_en_la_calle = resumen_clientes["Saldo_Pendiente"].sum()
+          else:
+            saldo_en_la_calle = 0.0
 
-          total_abonos_general = df_existente["Abono"].sum()
-          total_gastos = df_existente[
-              df_existente["Codigo"].str.contains("GASTO_", na=False)
-          ]["Cargo"].sum()
+          total_abonos_general = (
+              df_existente["Abono"].sum()
+              if "Abono" in df_existente.columns
+              else 0.0
+          )
+          total_gastos = (
+              df_existente[
+                  df_existente["Codigo"].str.contains("GASTO_", na=False)
+              ]["Cargo"].sum()
+              if "Cargo" in df_existente.columns
+              and "Codigo" in df_existente.columns
+              else 0.0
+          )
 
           def calcular_saldo_exacto(nombre_cuenta):
             nc = nombre_cuenta.lower()
+            if (
+                "Cuenta" not in df_existente.columns
+                or "Abono" not in df_existente.columns
+                or "Cargo" not in df_existente.columns
+            ):
+              return 0.0
             df_c = df_existente[df_existente["Cuenta"].str.lower() == nc]
             if df_c.empty:
               return 0.0
@@ -692,22 +724,25 @@ with tab_admin:
 
           st.divider()
           st.subheader("Estado de Cuenta de Clientes")
-          st.dataframe(
-              resumen_clientes[[
-                  "Codigo",
-                  "Nombre",
-                  "Total_Cargos",
-                  "Total_Abonos",
-                  "Saldo_Pendiente",
-              ]],
-              use_container_width=True,
-              hide_index=True,
-          )
+          if not resumen_clientes.empty and "Saldo_Pendiente" in resumen_clientes.columns:
+            st.dataframe(
+                resumen_clientes[[
+                    "Codigo",
+                    "Nombre",
+                    "Total_Cargos",
+                    "Total_Abonos",
+                    "Saldo_Pendiente",
+                ]],
+                use_container_width=True,
+                hide_index=True,
+            )
+          else:
+            st.info("No hay datos suficientes de clientes para mostrar la tabla.")
         else:
-          st.info("Aún no hay registros.")
+          st.info("Aún no hay registros en la hoja de cálculo.")
       except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error cargando el flujo de caja: {e}")
+        st.info("No hay clientes.")
 
-  else:
-    if clave_admin != "":
-      st.error("Contraseña incorrecta.")
+    
+            
