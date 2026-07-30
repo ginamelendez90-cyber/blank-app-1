@@ -78,7 +78,6 @@ with tab_cliente:
         prestamo_actual = movimientos_ciclo_actual["Cargo"].sum()
         pagos_actual = movimientos_ciclo_actual["Abono"].sum()
 
-        # Protección para evitar saldos negativos
         saldo_pendiente = max(0.0, prestamo_actual - pagos_actual)
 
         st.subheader(f"Cliente: {nombre}")
@@ -172,9 +171,6 @@ with tab_admin:
               "Abono",
           ],
       )
-      df_existente["Cuenta"] = (
-          df_existente["Cuenta"].astype(str).str.strip().str.title()
-      )
     except:
       try:
         df_existente = conn.read(
@@ -195,6 +191,9 @@ with tab_admin:
     if not df_existente.empty:
       df_existente["Codigo"] = df_existente["Codigo"].astype(str).str.strip()
       df_existente["Nombre"] = df_existente["Nombre"].astype(str).str.strip()
+      df_existente["Cuenta"] = (
+          df_existente["Cuenta"].astype(str).str.strip().str.title()
+      )
       df_existente["Cargo"] = pd.to_numeric(
           df_existente["Cargo"], errors="coerce"
       ).fillna(0.0)
@@ -452,6 +451,7 @@ with tab_admin:
               sheet = client.open_by_url(spreadsheet_url).sheet1
 
               nota_final = desc_iny if desc_iny else "Inyección de capital"
+              # Guardamos la inyección para que sume correctamente a la columna Abono de la cuenta elegida
               sheet.append_row([
                   fecha_inyeccion.strftime("%Y-%m-%d"),
                   f"CAJA_{cuenta_destino_iny.upper().replace(' ', '_')}",
@@ -465,6 +465,8 @@ with tab_admin:
               st.rerun()
             except Exception as e:
               st.error(f"Error: {e}")
+          else:
+            st.error("⚠️ El monto a inyectar debe ser mayor a 0.")
 
     # ------------------------------------------
     # 3. TRANSFERIR ENTRE CUENTAS
@@ -507,7 +509,7 @@ with tab_admin:
 
               sheet.append_row([
                   fecha_trans.strftime("%Y-%m-%d"),
-                  f"CUENTA_{cuenta_origen.upper()}",
+                  f"CUENTA_{cuenta_origen.upper().replace(' ', '_')}",
                   f"Transferencia enviada a {cuenta_destino}",
                   cuenta_origen,
                   float(monto_trans),
@@ -515,7 +517,7 @@ with tab_admin:
               ])
               sheet.append_row([
                   fecha_trans.strftime("%Y-%m-%d"),
-                  f"CUENTA_{cuenta_destino.upper()}",
+                  f"CUENTA_{cuenta_destino.upper().replace(' ', '_')}",
                   f"Transferencia recibida de {cuenta_origen}",
                   cuenta_destino,
                   0.0,
@@ -559,7 +561,7 @@ with tab_admin:
 
               sheet.append_row([
                   fecha_gasto.strftime("%Y-%m-%d"),
-                  f"GASTO_{cuenta_gasto.upper()}",
+                  f"GASTO_{cuenta_gasto.upper().replace(' ', '_')}",
                   desc_gasto,
                   cuenta_gasto,
                   float(monto_gasto),
@@ -621,18 +623,15 @@ with tab_admin:
       st.subheader("💰 Flujo de Caja y Saldo en Cuentas")
       try:
         if not df_existente.empty:
-          # Normalizar columna Cuenta para que no fallen las sumas por acentos o mayúsculas
-          if "Cuenta" in df_existente.columns:
-            df_existente["Cuenta_Limpa"] = (
-                df_existente["Cuenta"]
-                .astype(str)
-                .str.strip()
-                .str.lower()
-                .str.replace("ó", "o", regex=True)
-                .str.replace("í", "i", regex=True)
-            )
-          else:
-            df_existente["Cuenta_Limpa"] = "efectivo"
+          # Normalizar nombres de cuentas de manera uniforme
+          df_existente["Cuenta_Limpa"] = (
+              df_existente["Cuenta"]
+              .astype(str)
+              .str.strip()
+              .str.lower()
+              .str.replace("ó", "o", regex=True)
+              .str.replace("í", "i", regex=True)
+          )
 
           df_clientes = df_existente[
               ~df_existente["Codigo"].str.contains(
@@ -716,14 +715,15 @@ with tab_admin:
                 .replace("í", "i")
                 .strip()
             )
-            if "Cuenta_Limpa" not in df_existente.columns:
-              return 0.0
             df_c = df_existente[df_existente["Cuenta_Limpa"] == nc]
             if df_c.empty:
               return 0.0
+            
+            # Sumar todos los Abonos (ingresos, inyecciones, pagos de clientes a esta cuenta)
             total_entradas = (
                 df_c["Abono"].sum() if "Abono" in df_c.columns else 0.0
             )
+            # Sumar todos los Cargos (préstamos salientes, gastos, transferencias enviadas)
             total_salidas = (
                 df_c["Cargo"].sum() if "Cargo" in df_c.columns else 0.0
             )
