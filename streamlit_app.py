@@ -451,12 +451,10 @@ with tab_admin:
               ]
               sheet = client.open_by_url(spreadsheet_url).sheet1
 
-              nota_final = (
-                  desc_iny if desc_iny else "Inyección de capital"
-              )
+              nota_final = desc_iny if desc_iny else "Inyección de capital"
               sheet.append_row([
                   fecha_inyeccion.strftime("%Y-%m-%d"),
-                  f"CAJA_{cuenta_destino_iny.upper()}",
+                  f"CAJA_{cuenta_destino_iny.upper().replace(' ', '_')}",
                   "Inyección de Capital",
                   nota_final,
                   cuenta_destino_iny,
@@ -623,6 +621,19 @@ with tab_admin:
       st.subheader("💰 Flujo de Caja y Saldo en Cuentas")
       try:
         if not df_existente.empty:
+          # Normalizar columna Cuenta para que no fallen las sumas por acentos o mayúsculas
+          if "Cuenta" in df_existente.columns:
+            df_existente["Cuenta_Limpa"] = (
+                df_existente["Cuenta"]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .str.replace("ó", "o", regex=True)
+                .str.replace("í", "i", regex=True)
+            )
+          else:
+            df_existente["Cuenta_Limpa"] = "efectivo"
+
           df_clientes = df_existente[
               ~df_existente["Codigo"].str.contains(
                   "CUENTA_|GASTO_|CAJA_", na=False
@@ -698,19 +709,24 @@ with tab_admin:
               else 0.0
           )
 
-          def calcular_saldo_exacto(nombre_cuenta):
-            nc = nombre_cuenta.lower()
-            if (
-                "Cuenta" not in df_existente.columns
-                or "Abono" not in df_existente.columns
-                or "Cargo" not in df_existente.columns
-            ):
+          def calcular_saldo_exacto(nombre_cuenta_buscada):
+            nc = (
+                nombre_cuenta_buscada.lower()
+                .replace("ó", "o")
+                .replace("í", "i")
+                .strip()
+            )
+            if "Cuenta_Limpa" not in df_existente.columns:
               return 0.0
-            df_c = df_existente[df_existente["Cuenta"].str.lower() == nc]
+            df_c = df_existente[df_existente["Cuenta_Limpa"] == nc]
             if df_c.empty:
               return 0.0
-            total_entradas = df_c["Abono"].sum()
-            total_salidas = df_c["Cargo"].sum()
+            total_entradas = (
+                df_c["Abono"].sum() if "Abono" in df_c.columns else 0.0
+            )
+            total_salidas = (
+                df_c["Cargo"].sum() if "Cargo" in df_c.columns else 0.0
+            )
             return total_entradas - total_salidas
 
           efectivo_total = calcular_saldo_exacto("Efectivo")
