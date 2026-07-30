@@ -2,7 +2,6 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 import gspread
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
@@ -37,12 +36,12 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 
 # ==========================================
-# LÓGICA DE CÁLCULO DE SALDOS (CORREGIDA)
+# LÓGICA DE CÁLCULO DE SALDOS
 # ==========================================
 def calcular_saldo_cuenta(df, cuenta_nombre):
     """Calcula el saldo exacto (Abonos - Cargos) para una cuenta específica
 
-    (Efectivo, Pago Móvil, Binance) sin falsos positivos en transferencias.
+    sin falsos positivos en transferencias.
     """
     if df.empty:
         return 0.0
@@ -69,23 +68,18 @@ def calcular_saldo_cuenta(df, cuenta_nombre):
 
     cuenta_norm = normalizar(cuenta_nombre)
 
-    # 1. Filtro por código explícito (CAJA_EFECTIVO, CUENTA_EFECTIVO, GASTO_EFECTIVO)
     cond_codigo = (
         df_clean["Codigo_norm"].str.contains(f"CAJA_{cuenta_norm}")
         | df_clean["Codigo_norm"].str.contains(f"GASTO_{cuenta_norm}")
         | df_clean["Codigo_norm"].str.contains(f"CUENTA_{cuenta_norm}")
     )
 
-    # 2. Filtro por movimientos de clientes con etiqueta de cuenta (ej. "(EFECTIVO)", "SALIDA DE EFECTIVO")
-    # Se excluye "CUENTA_" para no registrar las descripciones cruzadas de transferencias.
     cond_concepto = (~df_clean["Codigo_norm"].str.contains("CUENTA_")) & (
         df_clean["Concepto_norm"].str.contains(f"\\({cuenta_norm}\\)")
         | df_clean["Concepto_norm"].str.contains(f"SALIDA DE {cuenta_norm}")
     )
 
     df_cuenta = df_clean[cond_codigo | cond_concepto]
-
-    # Saldo neto = Abonos (Entradas) - Cargos (Salidas)
     return float(df_cuenta["Abono"].sum() - df_cuenta["Cargo"].sum())
 
 
@@ -96,10 +90,9 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.5")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.6")
 st.sidebar.divider()
 
-# Autenticación Admin en la Barra Lateral
 st.sidebar.subheader("🔒 Acceso Admin")
 clave_admin = st.sidebar.text_input(
     "Contraseña:", type="password", key="clave_admin_sidebar"
@@ -206,7 +199,7 @@ if modo_vista == "👤 Portal del Cliente":
                             )
 
                     st.caption(
-                        f"📊 *Acumulado histórico total (Capital + Intereses): ${total_cargos_historico:,.2f}*"
+                        f"📊 *Acumulado histórico total: ${total_cargos_historico:,.2f}*"
                     )
 
                     st.divider()
@@ -258,9 +251,9 @@ else:
             [
                 "📊 Flujo de Caja",
                 "➕ Registrar Movimiento",
-                "💼 Alimentar Cajas",
+                "💼 Aportes / Retiros Dueño",
                 "🔄 Transferencias",
-                "📉 Gastos",
+                "📉 Gastos Operativos",
                 "✂️ Liquidar Crédito",
                 "📅 Cierre de Mes",
             ],
@@ -331,7 +324,6 @@ else:
                         "Saldo_Pendiente"
                     ].sum()
 
-                    # Cálculos con la función corregida
                     efectivo_total = calcular_saldo_cuenta(
                         df_existente, "Efectivo"
                     )
@@ -369,42 +361,57 @@ else:
 
                     st.divider()
 
+                    # NUEVO APARTADO: RESUMEN DE MOVIMIENTOS PERSONALES DEL DUEÑO
+                    df_caja_dueno = df_existente[
+                        df_existente["Codigo"].str.contains("CAJA_", na=False)
+                    ]
+                    total_inyecciones_dueno = df_caja_dueno["Abono"].sum()
+                    total_retiros_dueno = df_caja_dueno["Cargo"].sum()
+                    balance_dueno = (
+                        total_inyecciones_dueno - total_retiros_dueno
+                    )
+
+                    with st.expander(
+                        "👤 Ver Histórico de Movimientos de Capital del Dueño (Aportes vs Retiros)",
+                        expanded=True,
+                    ):
+                        cd1, cd2, cd3 = st.columns(3)
+                        cd1.metric(
+                            "📥 Capital Inyectado (Ingresado)",
+                            f"${total_inyecciones_dueno:,.2f}",
+                        )
+                        cd2.metric(
+                            "📤 Capital Retirado (Uso Personal)",
+                            f"${total_retiros_dueno:,.2f}",
+                        )
+                        cd3.metric(
+                            "⚖️ Aporte Neto del Dueño",
+                            f"${balance_dueno:,.2f}",
+                            delta=f"${balance_dueno:,.2f}",
+                        )
+
+                    st.divider()
+
                     col_chart, col_cuentas = st.columns([1.2, 1])
 
                     with col_chart:
                         with st.container(border=True):
                             st.subheader("📊 Distribución de Cajas")
-                            df_pie = pd.DataFrame(
+                            df_cuentas_chart = pd.DataFrame(
                                 {
                                     "Cuenta": [
                                         "Efectivo",
                                         "Pago Móvil",
                                         "Binance",
                                     ],
-                                    "Monto": [
+                                    "Monto ($)": [
                                         max(0, efectivo_total),
                                         max(0, pago_movil_total),
                                         max(0, binance_total),
                                     ],
                                 }
-                            )
-                            fig = px.pie(
-                                df_pie,
-                                values="Monto",
-                                names="Cuenta",
-                                hole=0.45,
-                                color="Cuenta",
-                                color_discrete_map={
-                                    "Efectivo": "#2ecc71",
-                                    "Pago Móvil": "#3498db",
-                                    "Binance": "#f1c40f",
-                                },
-                            )
-                            fig.update_layout(
-                                margin=dict(t=20, b=20, l=10, r=10),
-                                height=260,
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
+                            ).set_index("Cuenta")
+                            st.bar_chart(df_cuentas_chart)
 
                     with col_cuentas:
                         with st.container(border=True):
@@ -764,29 +771,42 @@ else:
                             )
 
         # ------------------------------------------
-        # 3. ALIMENTAR CAJAS
+        # 3. APORTES Y RETIROS DE CAPITAL (DUEÑO)
         # ------------------------------------------
-        elif seccion_admin == "💼 Alimentar Cajas":
+        elif seccion_admin == "💼 Aportes / Retiros Dueño":
             with st.container(border=True):
-                st.subheader("💼 Inyección de Capital a Cajas")
+                st.subheader("💼 Gestión de Capital Propio (Aportes y Retiros)")
                 st.caption(
-                    "Agrega fondos propios directamente a tus cuentas sin alterar saldos de clientes."
+                    "Ingresa o retira dinero de tus cajas para uso personal sin afectar los gastos operativos del negocio ni generar recargos."
                 )
 
-                with st.form("form_inyectar"):
-                    fin = st.date_input("Fecha", datetime.now())
-                    cin = st.selectbox(
-                        "Cuenta destino", ["Efectivo", "Pago Móvil", "Binance"]
+                tipo_op_capital = st.radio(
+                    "Seleccione la operación a realizar:",
+                    [
+                        "📥 Inyectar Capital (Ingresar plata propia)",
+                        "📤 Retirar Capital (Sacar plata sin generar gasto)",
+                    ],
+                    horizontal=True,
+                )
+
+                with st.form("form_capital_dueno"):
+                    f_cap = st.date_input("Fecha", datetime.now())
+                    c_cap = st.selectbox(
+                        "Cuenta afectada:",
+                        ["Efectivo", "Pago Móvil", "Binance"],
                     )
-                    miny = st.number_input(
-                        "Monto a Inyectar ($)", min_value=0.0
+                    m_cap = st.number_input(
+                        "Monto ($)", min_value=0.0, value=0.0
                     )
-                    din = st.text_input("Nota / Origen de los fondos")
+                    d_cap = st.text_input("Nota / Observación (Opcional)")
 
                     if st.form_submit_button(
-                        "Ingresar Fondos", use_container_width=True
+                        "💾 Registrar Movimiento de Capital",
+                        use_container_width=True,
                     ):
-                        if miny > 0:
+                        if m_cap <= 0:
+                            st.error("⚠️ El monto debe ser mayor a 0.")
+                        else:
                             try:
                                 scope = [
                                     "https://www.googleapis.com/auth/spreadsheets",
@@ -803,21 +823,39 @@ else:
                                     ]
                                 ).sheet1
 
+                                if (
+                                    "Inyectar" in tipo_op_capital
+                                ):  # Suma a la caja
+                                    cargo_val = 0.0
+                                    abono_val = float(m_cap)
+                                    concepto_final = (
+                                        f"Inyección de Capital ({c_cap})"
+                                        + (f" - {d_cap}" if d_cap else "")
+                                    )
+                                else:  # Resta de la caja (Retiro personal)
+                                    cargo_val = float(m_cap)
+                                    abono_val = 0.0
+                                    concepto_final = (
+                                        f"Retiro de Capital Personal ({c_cap})"
+                                        + (f" - {d_cap}" if d_cap else "")
+                                    )
+
                                 fila = [
-                                    fin.strftime("%Y-%m-%d"),
-                                    f"CAJA_{cin.upper()}",
-                                    f"Inyección de Capital ({cin})",
-                                    din if din else f"Inyección a {cin}",
-                                    0.0,
-                                    float(miny),
+                                    f_cap.strftime("%Y-%m-%d"),
+                                    f"CAJA_{c_cap.upper()}",
+                                    f"Dueño ({c_cap})",
+                                    concepto_final,
+                                    cargo_val,
+                                    abono_val,
                                 ]
                                 sheet.append_row(fila)
                                 st.toast(
-                                    "✅ Capital ingresado con éxito", icon="🎉"
+                                    "✅ Movimiento de capital registrado correctamente",
+                                    icon="💼",
                                 )
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error: {e}")
+                                st.error(f"Error al conectar con la hoja: {e}")
 
         # ------------------------------------------
         # 4. TRANSFERENCIAS ENTRE CUENTAS
@@ -862,19 +900,17 @@ else:
                                     ]
                                 ).sheet1
 
-                                # Fila 1: Salida del Origen (CARGO)
                                 sheet.append_row(
                                     [
                                         ftr.strftime("%Y-%m-%d"),
                                         f"CUENTA_{cor.upper()}",
                                         f"Sistema ({cor})",
                                         f"Transferencia enviada a {cde}",
-                                        float(mtr),  # Salida
+                                        float(mtr),
                                         0.0,
                                     ]
                                 )
 
-                                # Fila 2: Entrada al Destino (ABONO)
                                 sheet.append_row(
                                     [
                                         ftr.strftime("%Y-%m-%d"),
@@ -882,7 +918,7 @@ else:
                                         f"Sistema ({cde})",
                                         f"Transferencia recibida de {cor}",
                                         0.0,
-                                        float(mtr),  # Entrada
+                                        float(mtr),
                                     ]
                                 )
 
@@ -895,11 +931,14 @@ else:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 5. REGISTRAR GASTOS
+        # 5. REGISTRAR GASTOS OPERATIVOS
         # ------------------------------------------
-        elif seccion_admin == "📉 Gastos":
+        elif seccion_admin == "📉 Gastos Operativos":
             with st.container(border=True):
-                st.subheader("📉 Registrar Gasto Operativo")
+                st.subheader("📉 Registrar Gasto Operativo del Negocio")
+                st.caption(
+                    "Utiliza esta sección únicamente para gastos reales de la empresa (papelería, transporte, nómina, servicios)."
+                )
 
                 with st.form("form_gastos_op"):
                     fga = st.date_input("Fecha", datetime.now())
@@ -951,9 +990,6 @@ else:
         elif seccion_admin == "✂️ Liquidar Crédito":
             with st.container(border=True):
                 st.subheader("✂️ Cerrar Ciclo de Crédito")
-                st.caption(
-                    "Genera una marca de corte para reiniciar la cuenta del cliente sin perder su historial."
-                )
 
                 if opciones_clientes:
                     cli_liq = st.selectbox(
@@ -1076,25 +1112,16 @@ else:
                         {
                             "Categoría": [
                                 "Capital Prestado",
-                                "Recaudado (Abonos)",
+                                "Recaudado",
                                 "Intereses",
                                 "Gastos",
                             ],
-                            "Monto": [
+                            "Monto ($)": [
                                 prestamos_mes,
                                 cobrado_mes,
                                 intereses_mes,
                                 gastos_mes,
                             ],
                         }
-                    )
-                    fig_mes = px.bar(
-                        df_bar_mes,
-                        x="Categoría",
-                        y="Monto",
-                        color="Categoría",
-                        text_auto=".2f",
-                        title=f"Rendimiento de {mes_sel}",
-                    )
-                    fig_mes.update_layout(height=320, showlegend=False)
-                    st.plotly_chart(fig_mes, use_container_width=True)
+                    ).set_index("Categoría")
+                    st.bar_chart(df_bar_mes)
