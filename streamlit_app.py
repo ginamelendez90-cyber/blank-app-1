@@ -1,4 +1,5 @@
 from datetime import datetime
+import uuid
 from google.oauth2.service_account import Credentials
 import gspread
 import pandas as pd
@@ -36,13 +37,46 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 
 # ==========================================
-# LÓGICA DE CÁLCULO DE SALDOS
+# FUNCIONES AUXILIARES DE BASE DE DATOS
 # ==========================================
-def calcular_saldo_cuenta(df, cuenta_nombre):
-    """Calcula el saldo exacto (Abonos - Cargos) para una cuenta específica
+def obtener_cliente_gspread():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds_dict = dict(st.secrets["connections"]["gsheets"])
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    return gspread.authorize(creds)
 
-    sin falsos positivos en transferencias.
-    """
+
+def obtener_hoja(nombre_hoja="Sheet1"):
+    client = obtener_cliente_gspread()
+    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+    sh = client.open_by_url(url)
+    try:
+        return sh.worksheet(nombre_hoja)
+    except Exception:
+        if nombre_hoja == "PAGOS_PENDIENTES":
+            ws = sh.add_worksheet(
+                title="PAGOS_PENDIENTES", rows="1000", cols="10"
+            )
+            ws.append_row(
+                [
+                    "ID",
+                    "Fecha",
+                    "Codigo",
+                    "Nombre",
+                    "Cuenta",
+                    "Referencia",
+                    "Monto",
+                    "Estado",
+                ]
+            )
+            return ws
+        raise
+
+
+def calcular_saldo_cuenta(df, cuenta_nombre):
     if df.empty:
         return 0.0
 
@@ -84,20 +118,19 @@ def calcular_saldo_cuenta(df, cuenta_nombre):
 
 
 # ==========================================
-# BARRA LATERAL (NAVEGACIÓN Y AUTENTICACIÓN)
+# BARRA LATERAL (NAVEGACIÓN)
 # ==========================================
 st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.6")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.7")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
 clave_admin = st.sidebar.text_input(
     "Contraseña:", type="password", key="clave_admin_sidebar"
 )
-
 es_admin_autenticado = clave_admin == "admin123"
 
 if es_admin_autenticado:
@@ -117,123 +150,183 @@ modo_vista = st.sidebar.radio(
 # PESTAÑA 1: PORTAL DEL CLIENTE
 # ==========================================
 if modo_vista == "👤 Portal del Cliente":
-    st.title("👤 Consulta de Estado de Cuenta")
-    st.write("Consulta el estado actual de tu crédito y el historial de pagos.")
+    st.title("👤 Portal de Atención al Cliente")
 
-    with st.container(border=True):
-        col_busq1, col_busq2 = st.columns([3, 1])
-        codigo_cliente = col_busq1.text_input(
-            "Ingrese su Código de Cliente:", placeholder="Ej. CLI-001"
-        )
-        btn_consultar = col_busq2.button(
-            "🔎 Consultar", use_container_width=True
-        )
+    opcion_cliente = st.segmented_control(
+        "¿Qué deseas realizar?:",
+        ["🔎 Consultar Estado de Cuenta", "📲 Reportar un Pago"],
+        default="🔎 Consultar Estado de Cuenta",
+    )
+    st.divider()
 
-    if btn_consultar or codigo_cliente:
-        if codigo_cliente:
-            try:
-                df = conn.read(
-                    ttl=0,
-                    usecols=[
-                        "Fecha",
-                        "Codigo",
-                        "Nombre",
-                        "Concepto",
-                        "Cargo",
-                        "Abono",
-                    ],
-                )
+    # --- SUB-SECCIÓN: CONSULTAR ESTADO ---
+    if opcion_cliente == "🔎 Consultar Estado de Cuenta":
+        st.write("Consulta el estado actual de tu crédito y tu historial.")
 
-                df["Codigo"] = df["Codigo"].astype(str).str.strip()
-                codigo_buscado = str(codigo_cliente).strip()
+        with st.container(border=True):
+            col_busq1, col_busq2 = st.columns([3, 1])
+            codigo_cliente = col_busq1.text_input(
+                "Ingrese su Código de Cliente:", placeholder="Ej. CLI-001"
+            )
+            btn_consultar = col_busq2.button(
+                "🔎 Consultar", use_container_width=True
+            )
 
-                resultado = df[df["Codigo"] == codigo_buscado]
-
-                if not resultado.empty:
-                    nombre = resultado.iloc[0]["Nombre"]
-                    total_cargos_historico = resultado["Cargo"].sum()
-
-                    indices_liquidacion = resultado[
-                        resultado["Concepto"].str.contains(
-                            "Crédito anterior liquidado", case=False, na=False
-                        )
-                    ].index
-
-                    if not indices_liquidacion.empty:
-                        ultimo_corte_idx = indices_liquidacion[-1]
-                        movimientos_ciclo_actual = resultado.loc[
-                            resultado.index > ultimo_corte_idx
-                        ]
-                        movimientos_historicos = resultado.loc[
-                            resultado.index <= ultimo_corte_idx
-                        ]
-                    else:
-                        movimientos_ciclo_actual = resultado
-                        movimientos_historicos = pd.DataFrame()
-
-                    prestamo_actual = movimientos_ciclo_actual["Cargo"].sum()
-                    pagos_actual = movimientos_ciclo_actual["Abono"].sum()
-                    saldo_pendiente = prestamo_actual - pagos_actual
-
-                    st.subheader(f"Bienvenido/a, **{nombre}**")
-
-                    m1, m2, m3 = st.columns(3)
-                    with m1:
-                        with st.container(border=True):
-                            st.metric(
-                                "📌 Deuda Total Actual",
-                                f"${prestamo_actual:,.2f}",
-                            )
-                    with m2:
-                        with st.container(border=True):
-                            st.metric(
-                                "💵 Total Abonado", f"${pagos_actual:,.2f}"
-                            )
-                    with m3:
-                        with st.container(border=True):
-                            st.metric(
-                                "⚠️ Saldo Pendiente",
-                                f"${saldo_pendiente:,.2f}",
-                                delta=f"-${saldo_pendiente:,.2f}",
-                                delta_color="inverse",
-                            )
-
-                    st.caption(
-                        f"📊 *Acumulado histórico total: ${total_cargos_historico:,.2f}*"
+        if btn_consultar or codigo_cliente:
+            if codigo_cliente:
+                try:
+                    df = conn.read(
+                        ttl=0,
+                        usecols=[
+                            "Fecha",
+                            "Codigo",
+                            "Nombre",
+                            "Concepto",
+                            "Cargo",
+                            "Abono",
+                        ],
                     )
+                    df["Codigo"] = df["Codigo"].astype(str).str.strip()
+                    resultado = df[df["Codigo"] == str(codigo_cliente).strip()]
 
-                    st.divider()
-                    st.subheader("📋 Historial del Crédito Vigente")
-                    if not movimientos_ciclo_actual.empty:
-                        st.dataframe(
-                            movimientos_ciclo_actual[
-                                ["Fecha", "Concepto", "Cargo", "Abono"]
-                            ],
-                            use_container_width=True,
-                            hide_index=True,
+                    if not resultado.empty:
+                        nombre = resultado.iloc[0]["Nombre"]
+                        total_cargos_historico = resultado["Cargo"].sum()
+
+                        indices_liq = resultado[
+                            resultado["Concepto"].str.contains(
+                                "Crédito anterior liquidado",
+                                case=False,
+                                na=False,
+                            )
+                        ].index
+
+                        if not indices_liq.empty:
+                            ult_idx = indices_liq[-1]
+                            mov_actuales = resultado.loc[
+                                resultado.index > ult_idx
+                            ]
+                            mov_historicos = resultado.loc[
+                                resultado.index <= ult_idx
+                            ]
+                        else:
+                            mov_actuales = resultado
+                            mov_historicos = pd.DataFrame()
+
+                        prestamo_actual = mov_actuales["Cargo"].sum()
+                        pagos_actual = mov_actuales["Abono"].sum()
+                        saldo_pendiente = prestamo_actual - pagos_actual
+
+                        st.subheader(f"Bienvenido/a, **{nombre}**")
+
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric(
+                            "📌 Deuda Total Actual", f"${prestamo_actual:,.2f}"
                         )
-                    else:
-                        st.info("No hay movimientos activos en este ciclo.")
+                        m2.metric("💵 Total Abonado", f"${pagos_actual:,.2f}")
+                        m3.metric(
+                            "⚠️ Saldo Pendiente",
+                            f"${saldo_pendiente:,.2f}",
+                            delta=f"-${saldo_pendiente:,.2f}",
+                            delta_color="inverse",
+                        )
 
-                    if not movimientos_historicos.empty:
-                        with st.expander(
-                            "📂 Ver Historial de Créditos Liquidados"
-                        ):
+                        st.caption(
+                            f"📊 *Acumulado histórico total: ${total_cargos_historico:,.2f}*"
+                        )
+
+                        st.divider()
+                        st.subheader("📋 Historial del Crédito Vigente")
+                        if not mov_actuales.empty:
                             st.dataframe(
-                                movimientos_historicos[
+                                mov_actuales[
                                     ["Fecha", "Concepto", "Cargo", "Abono"]
                                 ],
                                 use_container_width=True,
                                 hide_index=True,
                             )
+
+                        if not mov_historicos.empty:
+                            with st.expander(
+                                "📂 Ver Historial de Créditos Liquidados"
+                            ):
+                                st.dataframe(
+                                    mov_historicos[
+                                        ["Fecha", "Concepto", "Cargo", "Abono"]
+                                    ],
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+                    else:
+                        st.error("❌ Código no encontrado.")
+                except Exception as e:
+                    st.error(f"Error de conexión: {e}")
+
+    # --- SUB-SECCIÓN: REPORTAR PAGO ---
+    elif opcion_cliente == "📲 Reportar un Pago":
+        st.subheader("📲 Formulario de Reporte de Pago")
+        st.caption(
+            "Registra tu transferencia o pago móvil aquí para que sea validado por el administrador."
+        )
+
+        with st.form("form_reportar_pago_cliente", border=True):
+            col_p1, col_p2 = st.columns(2)
+            cod_cli_rep = col_p1.text_input(
+                "Tu Código de Cliente (Ej: CLI-001):"
+            )
+            nom_cli_rep = col_p2.text_input("Tu Nombre Completo:")
+
+            col_p3, col_p4 = st.columns(2)
+            f_pago = col_p3.date_input("Fecha del Pago", datetime.now())
+            cuenta_destino = col_p4.selectbox(
+                "Medio de Pago Utilizado:",
+                ["Pago Móvil", "Efectivo", "Binance"],
+            )
+
+            col_p5, col_p6 = st.columns(2)
+            monto_rep = col_p5.number_input(
+                "Monto Transferido ($)", min_value=0.01, value=10.0, step=1.0
+            )
+            num_ref = col_p6.text_input(
+                "Número de Referencia / Comprobante:",
+                placeholder="Ej. 849302",
+            )
+
+            btn_enviar_reporte = st.form_submit_button(
+                "📤 Enviar Comprobante para Verificación",
+                use_container_width=True,
+            )
+
+            if btn_enviar_reporte:
+                if cod_cli_rep and nom_cli_rep and num_ref and monto_rep > 0:
+                    try:
+                        sheet_pendientes = obtener_hoja("PAGOS_PENDIENTES")
+                        id_pago = f"PAG-{str(uuid.uuid4())[:6].upper()}"
+
+                        sheet_pendientes.append_row(
+                            [
+                                id_pago,
+                                f_pago.strftime("%Y-%m-%d"),
+                                str(cod_cli_rep).strip().upper(),
+                                nom_cli_rep.strip(),
+                                cuenta_destino,
+                                str(num_ref).strip(),
+                                float(monto_rep),
+                                "PENDIENTE",
+                            ]
+                        )
+
+                        st.success(
+                            f"🎉 **¡Pago registrado con éxito!**\n\n"
+                            f"📌 **ID de Registro:** `{id_pago}`\n\n"
+                            f"Tu abono de **${monto_rep:,.2f}** está en proceso de verificación por el administrador."
+                        )
+                    except Exception as e:
+                        st.error(f"Error al enviar reporte: {e}")
                 else:
-                    st.error(
-                        "❌ Código no encontrado. Verifique e intente nuevamente."
+                    st.warning(
+                        "⚠️ Por favor complete todos los campos obligatorios (Código, Nombre, Monto y Referencia)."
                     )
-            except Exception as e:
-                st.error(f"Error al conectar con la base de datos: {e}")
-        else:
-            st.warning("⚠️ Por favor ingrese un código válido.")
 
 # ==========================================
 # PESTAÑA 2: PANEL DE ADMINISTRADOR
@@ -243,25 +336,27 @@ else:
 
     if not es_admin_autenticado:
         st.warning(
-            "🔒 El panel de administración está bloqueado. Por favor ingrese la contraseña en la barra lateral izquierda."
+            "🔒 El panel de administración está bloqueado. Por favor ingrese la contraseña en la barra lateral."
         )
     else:
         seccion_admin = st.segmented_control(
             "Seleccione una sección:",
             [
+                "⏳ Abonos por Verificar",
                 "📊 Flujo de Caja",
-                "➕ Registrar Movimiento",
+                "➕ Registrar Movimiento Directo",
                 "💼 Aportes / Retiros Dueño",
                 "🔄 Transferencias",
                 "📉 Gastos Operativos",
                 "✂️ Liquidar Crédito",
                 "📅 Cierre de Mes",
             ],
-            default="📊 Flujo de Caja",
+            default="⏳ Abonos por Verificar",
         )
 
         st.divider()
 
+        # Cargar datos base
         try:
             df_existente = conn.read(
                 ttl=0,
@@ -297,9 +392,124 @@ else:
             df_existente = pd.DataFrame()
 
         # ------------------------------------------
-        # 1. FLUJO DE CAJA Y DASHBOARD
+        # 1. ABONOS POR VERIFICAR (APROBACIÓN DE CLIENTES)
         # ------------------------------------------
-        if seccion_admin == "📊 Flujo de Caja":
+        if seccion_admin == "⏳ Abonos por Verificar":
+            st.subheader("⏳ Confirmación de Pagos Reportados por Clientes")
+            st.caption(
+                "Verifica las transferencias reportadas contra tu banco/wallet antes de sumarlas al sistema."
+            )
+
+            try:
+                sheet_pendientes = obtener_hoja("PAGOS_PENDIENTES")
+                datos_pendientes = sheet_pendientes.get_all_records()
+                df_pendientes = pd.DataFrame(datos_pendientes)
+
+                if (
+                    not df_pendientes.empty
+                    and "Estado" in df_pendientes.columns
+                ):
+                    df_filtrado = df_pendientes[
+                        df_pendientes["Estado"] == "PENDIENTE"
+                    ]
+
+                    if not df_filtrado.empty:
+                        st.info(
+                            f"📬 Tienes **{len(df_filtrado)} pago(s) pendiente(s)** por revisar."
+                        )
+
+                        for idx, fila in df_filtrado.iterrows():
+                            with st.container(border=True):
+                                c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
+                                c1.markdown(f"👤 **Cliente:**\n{fila['Nombre']}")
+                                c1.caption(f"Código: {fila['Codigo']}")
+
+                                c2.markdown(
+                                    f"💵 **Monto:**\n# ${float(fila['Monto']):,.2f}"
+                                )
+                                c2.caption(f"Vía: {fila['Cuenta']}")
+
+                                c3.markdown(
+                                    f"🔢 **Referencia:**\n`{fila['Referencia']}`"
+                                )
+                                c3.caption(f"Fecha: {fila['Fecha']}")
+
+                                col_b1, col_b2 = c4.columns(2)
+
+                                # BOTÓN APROBAR
+                                if col_b1.button(
+                                    "✅ Aprobar",
+                                    key=f"app_{fila['ID']}",
+                                    use_container_width=True,
+                                ):
+                                    try:
+                                        # 1. Agregar a la hoja principal (Sheet1)
+                                        sheet_principal = obtener_hoja("Sheet1")
+                                        sheet_principal.append_row(
+                                            [
+                                                str(fila["Fecha"]),
+                                                str(fila["Codigo"]),
+                                                str(fila["Nombre"]),
+                                                f"Abono verificado Ref: {fila['Referencia']} ({fila['Cuenta']})",
+                                                0.0,
+                                                float(fila["Monto"]),
+                                            ]
+                                        )
+
+                                        # 2. Marcar como APROBADO en PAGOS_PENDIENTES
+                                        cell = sheet_pendientes.find(
+                                            str(fila["ID"])
+                                        )
+                                        sheet_pendientes.update_cell(
+                                            cell.row, 8, "APROBADO"
+                                        )
+
+                                        st.toast(
+                                            f"✅ Pago de {fila['Nombre']} por ${fila['Monto']} aprobado",
+                                            icon="🎉",
+                                        )
+                                        st.rerun()
+                                    except Exception as ex:
+                                        st.error(f"Error al aprobar: {ex}")
+
+                                # BOTÓN RECHAZAR
+                                if col_b2.button(
+                                    "❌ Rechazar",
+                                    key=f"rej_{fila['ID']}",
+                                    use_container_width=True,
+                                ):
+                                    try:
+                                        cell = sheet_pendientes.find(
+                                            str(fila["ID"])
+                                        )
+                                        sheet_pendientes.update_cell(
+                                            cell.row, 8, "RECHAZADO"
+                                        )
+                                        st.toast(
+                                            f"❌ Pago de {fila['Nombre']} rechazado.",
+                                            icon="⚠️",
+                                        )
+                                        st.rerun()
+                                    except Exception as ex:
+                                        st.error(f"Error al rechazar: {ex}")
+                    else:
+                        st.success(
+                            "🎉 ¡Todo al día! No hay pagos pendientes por verificar."
+                        )
+                else:
+                    st.success(
+                        "🎉 ¡Todo al día! No hay pagos pendientes por verificar."
+                    )
+            except Exception as e:
+                st.error(
+                    f"Error al cargar la hoja de PAGOS_PENDIENTES: {e}. "
+                    "Asegúrate de que la segunda pestaña exista en Google Sheets."
+                )
+
+        # ------------------------------------------
+        # 2. FLUJO DE CAJA Y DASHBOARD
+        # ------------------------------------------
+        elif seccion_admin == "📊 Flujo de Caja":
             try:
                 if not df_existente.empty:
                     df_clientes = df_existente[
@@ -340,28 +550,21 @@ else:
                     cartera_total = total_caja + saldo_en_la_calle
 
                     c_car1, c_car2, c_car3 = st.columns(3)
-                    with c_car1:
-                        with st.container(border=True):
-                            st.metric(
-                                "💎 Capital Total (Patrimonio)",
-                                f"${cartera_total:,.2f}",
-                            )
-                    with c_car2:
-                        with st.container(border=True):
-                            st.metric(
-                                "🏦 Total Líquido en Cajas",
-                                f"${total_caja:,.2f}",
-                            )
-                    with c_car3:
-                        with st.container(border=True):
-                            st.metric(
-                                "📌 Dinero Prestado en Calle",
-                                f"${saldo_en_la_calle:,.2f}",
-                            )
+                    c_car1.metric(
+                        "💎 Capital Total (Patrimonio)",
+                        f"${cartera_total:,.2f}",
+                    )
+                    c_car2.metric(
+                        "🏦 Total Líquido en Cajas", f"${total_caja:,.2f}"
+                    )
+                    c_car3.metric(
+                        "📌 Dinero Prestado en Calle",
+                        f"${saldo_en_la_calle:,.2f}",
+                    )
 
                     st.divider()
 
-                    # NUEVO APARTADO: RESUMEN DE MOVIMIENTOS PERSONALES DEL DUEÑO
+                    # MOVIMIENTOS PERSONALES DEL DUEÑO
                     df_caja_dueno = df_existente[
                         df_existente["Codigo"].str.contains("CAJA_", na=False)
                     ]
@@ -373,27 +576,24 @@ else:
 
                     with st.expander(
                         "👤 Ver Histórico de Movimientos de Capital del Dueño (Aportes vs Retiros)",
-                        expanded=True,
+                        expanded=False,
                     ):
                         cd1, cd2, cd3 = st.columns(3)
                         cd1.metric(
-                            "📥 Capital Inyectado (Ingresado)",
+                            "📥 Capital Inyectado",
                             f"${total_inyecciones_dueno:,.2f}",
                         )
                         cd2.metric(
-                            "📤 Capital Retirado (Uso Personal)",
+                            "📤 Capital Retirado (Personal)",
                             f"${total_retiros_dueno:,.2f}",
                         )
                         cd3.metric(
-                            "⚖️ Aporte Neto del Dueño",
-                            f"${balance_dueno:,.2f}",
-                            delta=f"${balance_dueno:,.2f}",
+                            "⚖️ Balance Neto Dueño", f"${balance_dueno:,.2f}"
                         )
 
                     st.divider()
 
                     col_chart, col_cuentas = st.columns([1.2, 1])
-
                     with col_chart:
                         with st.container(border=True):
                             st.subheader("📊 Distribución de Cajas")
@@ -441,22 +641,22 @@ else:
                         use_container_width=True,
                         hide_index=True,
                     )
-                else:
-                    st.info("Aún no hay registros en la base de datos.")
             except Exception as e:
                 st.error(f"Error al calcular flujo de caja: {e}")
 
         # ------------------------------------------
-        # 2. REGISTRAR MOVIMIENTOS
+        # 3. REGISTRAR MOVIMIENTO DIRECTO
         # ------------------------------------------
-        elif seccion_admin == "➕ Registrar Movimiento":
+        elif seccion_admin == "➕ Registrar Movimiento Directo":
             with st.container(border=True):
-                st.subheader("📝 Nuevo Registro (Cobro o Préstamo)")
+                st.subheader(
+                    "📝 Registrar Crédito o Pago Directo (Sin Verificación previa)"
+                )
 
                 tipo_movimiento = st.radio(
                     "Operación a realizar:",
                     [
-                        "Registrar Abono / Pago",
+                        "Registrar Abono / Pago Directo",
                         "Registrar Préstamo / Deuda Inicial",
                     ],
                     horizontal=True,
@@ -495,7 +695,7 @@ else:
                     )
 
                     tipo_cobro_abono = "Abono General"
-                    if tipo_movimiento == "Registrar Abono / Pago":
+                    if tipo_movimiento == "Registrar Abono / Pago Directo":
                         tipo_cobro_abono = st.selectbox(
                             "Frecuencia/Modalidad del Cobro:",
                             [
@@ -521,7 +721,6 @@ else:
                             value=0.0,
                             key="mc1",
                         )
-
                         otras_cuentas = [
                             c
                             for c in ["Efectivo", "Pago Móvil", "Binance"]
@@ -536,28 +735,27 @@ else:
                             value=0.0,
                             key="mc2",
                         )
-
                         monto_total_calculado = monto_c1 + monto_c2
                     else:
                         monto = st.number_input(
                             "Monto ($)", min_value=0.0, value=0.0
                         )
 
-                    tasa_interes = 0.0
-                    monto_interes_calc = 0.0
-                    frecuencia_pago = "Diario"
-                    num_cuotas = 1
-                    valor_cuota_calc = 0.0
+                    tasa_interes, monto_interes_calc = 0.0, 0.0
+                    frecuencia_pago, num_cuotas, valor_cuota_calc = (
+                        "Diario",
+                        1,
+                        0.0,
+                    )
 
                     if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
                         st.markdown("---")
-                        st.markdown("##### 📈 Calculadora de Cuotas y Frecuencia")
                         cp1, cp2, cp3 = st.columns(3)
                         tasa_interes = cp1.number_input(
                             "Interés (%)", min_value=0.0, value=15.0, step=1.0
                         )
                         frecuencia_pago = cp2.selectbox(
-                            "Frecuencia de Cobro",
+                            "Frecuencia",
                             ["Diario", "Semanal", "Quincenal", "Mensual"],
                         )
                         num_cuotas = cp3.number_input(
@@ -584,16 +782,13 @@ else:
 
                         if monto_base_calc > 0:
                             st.info(
-                                f"💵 **Capital:** ${monto_base_calc:,.2f} | "
-                                f"📈 **Interés:** ${monto_interes_calc:,.2f} | "
-                                f"⚠️ **Total Deuda:** ${deuda_total_calc:,.2f}\n\n"
-                                f"👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **${valor_cuota_calc:,.2f}** c/u"
+                                f"💵 **Capital:** ${monto_base_calc:,.2f} | 📈 **Interés:** ${monto_interes_calc:,.2f} | ⚠️ **Total:** ${deuda_total_calc:,.2f}\n\n"
+                                f"👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **${valor_cuota_calc:,.2f}**"
                             )
 
                     concepto_personalizado = st.text_input(
                         "Notas u observaciones (Opcional)"
                     )
-
                     btn_guardar = st.form_submit_button(
                         "💾 Guardar Movimiento", use_container_width=True
                     )
@@ -601,42 +796,17 @@ else:
                     if btn_guardar:
                         if nuevo_codigo and nuevo_nombre:
                             try:
-                                scope = [
-                                    "https://www.googleapis.com/auth/spreadsheets",
-                                    "https://www.googleapis.com/auth/drive",
-                                ]
-                                creds_dict = dict(
-                                    st.secrets["connections"]["gsheets"]
-                                )
-                                creds = Credentials.from_service_account_info(
-                                    creds_dict, scopes=scope
-                                )
-                                client = gspread.authorize(creds)
-
-                                spreadsheet_url = st.secrets["connections"][
-                                    "gsheets"
-                                ]["spreadsheet"]
-                                sheet = client.open_by_url(
-                                    spreadsheet_url
-                                ).sheet1
-
+                                sheet = obtener_hoja("Sheet1")
                                 filas_a_agregar = []
 
-                                if tipo_movimiento == "Registrar Abono / Pago":
-                                    desc_base = f"{tipo_cobro_abono}" + (
-                                        f" - {concepto_personalizado}"
-                                        if concepto_personalizado
-                                        else ""
-                                    )
-                                else:
-                                    desc_base = (
-                                        f"Préstamo {frecuencia_pago} ({num_cuotas} cuotas de ${valor_cuota_calc:,.2f})"
-                                        + (
-                                            f" - {concepto_personalizado}"
-                                            if concepto_personalizado
-                                            else ""
-                                        )
-                                    )
+                                desc_base = (
+                                    f"{tipo_cobro_abono}"
+                                    if tipo_movimiento
+                                    == "Registrar Abono / Pago Directo"
+                                    else f"Préstamo {frecuencia_pago} ({num_cuotas} cuotas de ${valor_cuota_calc:,.2f})"
+                                )
+                                if concepto_personalizado:
+                                    desc_base += f" - {concepto_personalizado}"
 
                                 if usar_dos_cuentas:
                                     if monto_total_calculado <= 0:
@@ -644,100 +814,56 @@ else:
                                             "⚠️ Ingrese un monto mayor a cero."
                                         )
                                         st.stop()
-
-                                    if (
+                                    is_abono = (
                                         tipo_movimiento
-                                        == "Registrar Abono / Pago"
-                                    ):
-                                        if monto_c1 > 0:
-                                            filas_a_agregar.append(
-                                                [
-                                                    nueva_fecha.strftime(
-                                                        "%Y-%m-%d"
-                                                    ),
-                                                    str(nuevo_codigo).strip(),
-                                                    nuevo_nombre,
-                                                    f"{desc_base} ({c_1})",
-                                                    0.0,
-                                                    float(monto_c1),
-                                                ]
-                                            )
-                                        if monto_c2 > 0:
-                                            filas_a_agregar.append(
-                                                [
-                                                    nueva_fecha.strftime(
-                                                        "%Y-%m-%d"
-                                                    ),
-                                                    str(nuevo_codigo).strip(),
-                                                    nuevo_nombre,
-                                                    f"{desc_base} ({c_2})",
-                                                    0.0,
-                                                    float(monto_c2),
-                                                ]
-                                            )
-                                    else:
-                                        if monto_c1 > 0:
-                                            filas_a_agregar.append(
-                                                [
-                                                    nueva_fecha.strftime(
-                                                        "%Y-%m-%d"
-                                                    ),
-                                                    str(nuevo_codigo).strip(),
-                                                    nuevo_nombre,
-                                                    f"{desc_base} (Salida de {c_1})",
-                                                    float(monto_c1),
-                                                    0.0,
-                                                ]
-                                            )
-                                        if monto_c2 > 0:
-                                            filas_a_agregar.append(
-                                                [
-                                                    nueva_fecha.strftime(
-                                                        "%Y-%m-%d"
-                                                    ),
-                                                    str(nuevo_codigo).strip(),
-                                                    nuevo_nombre,
-                                                    f"{desc_base} (Salida de {c_2})",
-                                                    float(monto_c2),
-                                                    0.0,
-                                                ]
-                                            )
+                                        == "Registrar Abono / Pago Directo"
+                                    )
+                                    if monto_c1 > 0:
+                                        filas_a_agregar.append(
+                                            [
+                                                nueva_fecha.strftime(
+                                                    "%Y-%m-%d"
+                                                ),
+                                                str(nuevo_codigo).strip(),
+                                                nuevo_nombre,
+                                                f"{desc_base} ({c_1 if is_abono else 'Salida de ' + c_1})",
+                                                0.0 if is_abono else float(monto_c1),
+                                                float(monto_c1) if is_abono else 0.0,
+                                            ]
+                                        )
+                                    if monto_c2 > 0:
+                                        filas_a_agregar.append(
+                                            [
+                                                nueva_fecha.strftime(
+                                                    "%Y-%m-%d"
+                                                ),
+                                                str(nuevo_codigo).strip(),
+                                                nuevo_nombre,
+                                                f"{desc_base} ({c_2 if is_abono else 'Salida de ' + c_2})",
+                                                0.0 if is_abono else float(monto_c2),
+                                                float(monto_c2) if is_abono else 0.0,
+                                            ]
+                                        )
                                 else:
                                     if monto <= 0:
                                         st.error(
                                             "⚠️ Ingrese un monto mayor a cero."
                                         )
                                         st.stop()
-
-                                    if (
+                                    is_abono = (
                                         tipo_movimiento
-                                        == "Registrar Abono / Pago"
-                                    ):
-                                        filas_a_agregar.append(
-                                            [
-                                                nueva_fecha.strftime(
-                                                    "%Y-%m-%d"
-                                                ),
-                                                str(nuevo_codigo).strip(),
-                                                nuevo_nombre,
-                                                f"{desc_base} ({cuenta_afectada})",
-                                                0.0,
-                                                float(monto),
-                                            ]
-                                        )
-                                    else:
-                                        filas_a_agregar.append(
-                                            [
-                                                nueva_fecha.strftime(
-                                                    "%Y-%m-%d"
-                                                ),
-                                                str(nuevo_codigo).strip(),
-                                                nuevo_nombre,
-                                                f"{desc_base} (Salida de {cuenta_afectada})",
-                                                float(monto),
-                                                0.0,
-                                            ]
-                                        )
+                                        == "Registrar Abono / Pago Directo"
+                                    )
+                                    filas_a_agregar.append(
+                                        [
+                                            nueva_fecha.strftime("%Y-%m-%d"),
+                                            str(nuevo_codigo).strip(),
+                                            nuevo_nombre,
+                                            f"{desc_base} ({cuenta_afectada if is_abono else 'Salida de ' + cuenta_afectada})",
+                                            0.0 if is_abono else float(monto),
+                                            float(monto) if is_abono else 0.0,
+                                        ]
+                                    )
 
                                 if (
                                     tipo_movimiento
@@ -749,7 +875,7 @@ else:
                                             nueva_fecha.strftime("%Y-%m-%d"),
                                             str(nuevo_codigo).strip(),
                                             nuevo_nombre,
-                                            f"Interés aplicado al préstamo ({tasa_interes}% - {frecuencia_pago})",
+                                            f"Interés aplicado ({tasa_interes}%)",
                                             float(monto_interes_calc),
                                             0.0,
                                         ]
@@ -765,26 +891,22 @@ else:
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error al guardar: {e}")
-                        else:
-                            st.error(
-                                "⚠️ Ingrese el código y nombre del cliente."
-                            )
 
         # ------------------------------------------
-        # 3. APORTES Y RETIROS DE CAPITAL (DUEÑO)
+        # 4. APORTES / RETIROS DUEÑO
         # ------------------------------------------
         elif seccion_admin == "💼 Aportes / Retiros Dueño":
             with st.container(border=True):
-                st.subheader("💼 Gestión de Capital Propio (Aportes y Retiros)")
+                st.subheader("💼 Movimientos de Capital Propio")
                 st.caption(
-                    "Ingresa o retira dinero de tus cajas para uso personal sin afectar los gastos operativos del negocio ni generar recargos."
+                    "Retira dinero para uso personal o aporta saldo sin generar gastos ni afectar la utilidad del negocio."
                 )
 
                 tipo_op_capital = st.radio(
-                    "Seleccione la operación a realizar:",
+                    "Operación:",
                     [
-                        "📥 Inyectar Capital (Ingresar plata propia)",
-                        "📤 Retirar Capital (Sacar plata sin generar gasto)",
+                        "📥 Inyectar Capital (Ingresar dinero)",
+                        "📤 Retirar Capital (Uso Personal sin recargo)",
                     ],
                     horizontal=True,
                 )
@@ -792,114 +914,59 @@ else:
                 with st.form("form_capital_dueno"):
                     f_cap = st.date_input("Fecha", datetime.now())
                     c_cap = st.selectbox(
-                        "Cuenta afectada:",
-                        ["Efectivo", "Pago Móvil", "Binance"],
+                        "Cuenta:", ["Efectivo", "Pago Móvil", "Binance"]
                     )
                     m_cap = st.number_input(
-                        "Monto ($)", min_value=0.0, value=0.0
+                        "Monto ($)", min_value=0.01, value=10.0
                     )
-                    d_cap = st.text_input("Nota / Observación (Opcional)")
+                    d_cap = st.text_input("Nota / Observación")
 
                     if st.form_submit_button(
-                        "💾 Registrar Movimiento de Capital",
-                        use_container_width=True,
+                        "💾 Registrar Capital", use_container_width=True
                     ):
-                        if m_cap <= 0:
-                            st.error("⚠️ El monto debe ser mayor a 0.")
-                        else:
-                            try:
-                                scope = [
-                                    "https://www.googleapis.com/auth/spreadsheets",
-                                    "https://www.googleapis.com/auth/drive",
-                                ]
-                                creds = Credentials.from_service_account_info(
-                                    dict(st.secrets["connections"]["gsheets"]),
-                                    scopes=scope,
-                                )
-                                client = gspread.authorize(creds)
-                                sheet = client.open_by_url(
-                                    st.secrets["connections"]["gsheets"][
-                                        "spreadsheet"
-                                    ]
-                                ).sheet1
+                        try:
+                            sheet = obtener_hoja("Sheet1")
+                            is_inyeccion = "Inyectar" in tipo_op_capital
 
-                                if (
-                                    "Inyectar" in tipo_op_capital
-                                ):  # Suma a la caja
-                                    cargo_val = 0.0
-                                    abono_val = float(m_cap)
-                                    concepto_final = (
-                                        f"Inyección de Capital ({c_cap})"
-                                        + (f" - {d_cap}" if d_cap else "")
-                                    )
-                                else:  # Resta de la caja (Retiro personal)
-                                    cargo_val = float(m_cap)
-                                    abono_val = 0.0
-                                    concepto_final = (
-                                        f"Retiro de Capital Personal ({c_cap})"
-                                        + (f" - {d_cap}" if d_cap else "")
-                                    )
-
-                                fila = [
-                                    f_cap.strftime("%Y-%m-%d"),
-                                    f"CAJA_{c_cap.upper()}",
-                                    f"Dueño ({c_cap})",
-                                    concepto_final,
-                                    cargo_val,
-                                    abono_val,
-                                ]
-                                sheet.append_row(fila)
-                                st.toast(
-                                    "✅ Movimiento de capital registrado correctamente",
-                                    icon="💼",
-                                )
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error al conectar con la hoja: {e}")
+                            fila = [
+                                f_cap.strftime("%Y-%m-%d"),
+                                f"CAJA_{c_cap.upper()}",
+                                f"Dueño ({c_cap})",
+                                f"{'Inyección' if is_inyeccion else 'Retiro Personal'} de Capital ({c_cap})"
+                                + (f" - {d_cap}" if d_cap else ""),
+                                0.0 if is_inyeccion else float(m_cap),
+                                float(m_cap) if is_inyeccion else 0.0,
+                            ]
+                            sheet.append_row(fila)
+                            st.toast("✅ Capital registrado", icon="💼")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 4. TRANSFERENCIAS ENTRE CUENTAS
+        # 5. TRANSFERENCIAS
         # ------------------------------------------
         elif seccion_admin == "🔄 Transferencias":
             with st.container(border=True):
                 st.subheader("🔄 Mover Dinero Entre Cuentas")
-
                 with st.form("form_trans"):
                     ftr = st.date_input("Fecha", datetime.now())
                     cor = st.selectbox(
-                        "Origen (Sale de:)",
-                        ["Efectivo", "Pago Móvil", "Binance"],
+                        "Origen:", ["Efectivo", "Pago Móvil", "Binance"]
                     )
                     cde = st.selectbox(
-                        "Destino (Entra a:)",
-                        ["Pago Móvil", "Efectivo", "Binance"],
+                        "Destino:", ["Pago Móvil", "Efectivo", "Binance"]
                     )
-                    mtr = st.number_input("Monto ($)", min_value=0.0)
+                    mtr = st.number_input("Monto ($)", min_value=0.01)
 
                     if st.form_submit_button(
-                        "Realizar Transferencia", use_container_width=True
+                        "Transferir", use_container_width=True
                     ):
                         if cor == cde:
                             st.error("⚠️ Las cuentas deben ser distintas.")
-                        elif mtr <= 0:
-                            st.error("⚠️ Ingrese un monto mayor a cero.")
                         else:
                             try:
-                                scope = [
-                                    "https://www.googleapis.com/auth/spreadsheets",
-                                    "https://www.googleapis.com/auth/drive",
-                                ]
-                                creds = Credentials.from_service_account_info(
-                                    dict(st.secrets["connections"]["gsheets"]),
-                                    scopes=scope,
-                                )
-                                client = gspread.authorize(creds)
-                                sheet = client.open_by_url(
-                                    st.secrets["connections"]["gsheets"][
-                                        "spreadsheet"
-                                    ]
-                                ).sheet1
-
+                                sheet = obtener_hoja("Sheet1")
                                 sheet.append_row(
                                     [
                                         ftr.strftime("%Y-%m-%d"),
@@ -910,7 +977,6 @@ else:
                                         0.0,
                                     ]
                                 )
-
                                 sheet.append_row(
                                     [
                                         ftr.strftime("%Y-%m-%d"),
@@ -921,53 +987,31 @@ else:
                                         float(mtr),
                                     ]
                                 )
-
-                                st.toast(
-                                    f"✅ Transferencia de ${mtr:,.2f} efectuada ({cor} ➡️ {cde})",
-                                    icon="🔄",
-                                )
+                                st.toast("✅ Transferencia realizada", icon="🔄")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 5. REGISTRAR GASTOS OPERATIVOS
+        # 6. GASTOS OPERATIVOS
         # ------------------------------------------
         elif seccion_admin == "📉 Gastos Operativos":
             with st.container(border=True):
-                st.subheader("📉 Registrar Gasto Operativo del Negocio")
-                st.caption(
-                    "Utiliza esta sección únicamente para gastos reales de la empresa (papelería, transporte, nómina, servicios)."
-                )
-
+                st.subheader("📉 Registrar Gasto Operativo Real")
                 with st.form("form_gastos_op"):
                     fga = st.date_input("Fecha", datetime.now())
                     cga = st.selectbox(
                         "Pagado con:", ["Efectivo", "Pago Móvil", "Binance"]
                     )
-                    dga = st.text_input("Concepto / Detalle del Gasto")
-                    mga = st.number_input("Monto ($)", min_value=0.0)
+                    dga = st.text_input("Detalle del Gasto")
+                    mga = st.number_input("Monto ($)", min_value=0.01)
 
                     if st.form_submit_button(
                         "Guardar Gasto", use_container_width=True
                     ):
-                        if dga and mga > 0:
+                        if dga:
                             try:
-                                scope = [
-                                    "https://www.googleapis.com/auth/spreadsheets",
-                                    "https://www.googleapis.com/auth/drive",
-                                ]
-                                creds = Credentials.from_service_account_info(
-                                    dict(st.secrets["connections"]["gsheets"]),
-                                    scopes=scope,
-                                )
-                                client = gspread.authorize(creds)
-                                sheet = client.open_by_url(
-                                    st.secrets["connections"]["gsheets"][
-                                        "spreadsheet"
-                                    ]
-                                ).sheet1
-
+                                sheet = obtener_hoja("Sheet1")
                                 sheet.append_row(
                                     [
                                         fga.strftime("%Y-%m-%d"),
@@ -978,22 +1022,20 @@ else:
                                         0.0,
                                     ]
                                 )
-
                                 st.toast("✅ Gasto registrado", icon="📉")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 6. LIQUIDAR CRÉDITOS
+        # 7. LIQUIDAR CRÉDITO
         # ------------------------------------------
         elif seccion_admin == "✂️ Liquidar Crédito":
             with st.container(border=True):
                 st.subheader("✂️ Cerrar Ciclo de Crédito")
-
                 if opciones_clientes:
                     cli_liq = st.selectbox(
-                        "Seleccionar Cliente a Liquidar:", opciones_clientes
+                        "Cliente a Liquidar:", opciones_clientes
                     )
                     cod_liq = cli_liq.split(" - ")[0]
                     nom_liq = cli_liq.split(" - ")[1]
@@ -1003,21 +1045,7 @@ else:
                         use_container_width=True,
                     ):
                         try:
-                            scope = [
-                                "https://www.googleapis.com/auth/spreadsheets",
-                                "https://www.googleapis.com/auth/drive",
-                            ]
-                            creds = Credentials.from_service_account_info(
-                                dict(st.secrets["connections"]["gsheets"]),
-                                scopes=scope,
-                            )
-                            client = gspread.authorize(creds)
-                            sheet = client.open_by_url(
-                                st.secrets["connections"]["gsheets"][
-                                    "spreadsheet"
-                                ]
-                            ).sheet1
-
+                            sheet = obtener_hoja("Sheet1")
                             sheet.append_row(
                                 [
                                     datetime.now().strftime("%Y-%m-%d"),
@@ -1036,26 +1064,20 @@ else:
                             st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 7. CIERRE DE MES Y ANALÍTICA
+        # 8. CIERRE DE MES
         # ------------------------------------------
         elif seccion_admin == "📅 Cierre de Mes":
             st.subheader("📅 Reporte Financiero Mensual")
-
             if not df_existente.empty:
                 df_existente["Fecha"] = pd.to_datetime(
                     df_existente["Fecha"], errors="coerce"
                 )
                 df_valido = df_existente.dropna(subset=["Fecha"]).copy()
-
                 df_valido["Mes_Año"] = df_valido["Fecha"].dt.strftime("%Y-%m")
-                meses_disponibles = sorted(
-                    df_valido["Mes_Año"].unique(), reverse=True
-                )
+                meses = sorted(df_valido["Mes_Año"].unique(), reverse=True)
 
-                if meses_disponibles:
-                    mes_sel = st.selectbox(
-                        "Seleccionar Mes:", meses_disponibles
-                    )
+                if meses:
+                    mes_sel = st.selectbox("Seleccionar Mes:", meses)
                     df_mes = df_valido[df_valido["Mes_Año"] == mes_sel]
 
                     gastos_mes = df_mes[
@@ -1066,62 +1088,13 @@ else:
                             "Interés aplicado", case=False, na=False
                         )
                     ]["Cargo"].sum()
-                    prestamos_mes = df_mes[
-                        (
-                            ~df_mes["Codigo"].str.contains(
-                                "CUENTA_|GASTO_|CAJA_", na=False
-                            )
-                        )
-                        & (
-                            ~df_mes["Concepto"].str.contains(
-                                "Interés aplicado", case=False, na=False
-                            )
-                        )
-                    ]["Cargo"].sum()
-
-                    cobrado_mes = df_mes[
-                        ~df_mes["Codigo"].str.contains(
-                            "CUENTA_|GASTO_|CAJA_", na=False
-                        )
-                    ]["Abono"].sum()
                     ganancia_neta = intereses_mes - gastos_mes
 
                     m1, m2, m3 = st.columns(3)
-                    with m1:
-                        with st.container(border=True):
-                            st.metric(
-                                "📈 Intereses Generados",
-                                f"${intereses_mes:,.2f}",
-                            )
-                    with m2:
-                        with st.container(border=True):
-                            st.metric(
-                                "📉 Gastos Operativos", f"${gastos_mes:,.2f}"
-                            )
-                    with m3:
-                        with st.container(border=True):
-                            st.metric(
-                                "💰 Ganancia Neta",
-                                f"${ganancia_neta:,.2f}",
-                                delta=f"${ganancia_neta:,.2f}",
-                            )
-
-                    st.divider()
-
-                    df_bar_mes = pd.DataFrame(
-                        {
-                            "Categoría": [
-                                "Capital Prestado",
-                                "Recaudado",
-                                "Intereses",
-                                "Gastos",
-                            ],
-                            "Monto ($)": [
-                                prestamos_mes,
-                                cobrado_mes,
-                                intereses_mes,
-                                gastos_mes,
-                            ],
-                        }
-                    ).set_index("Categoría")
-                    st.bar_chart(df_bar_mes)
+                    m1.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}")
+                    m2.metric("📉 Gastos Operativos", f"${gastos_mes:,.2f}")
+                    m3.metric(
+                        "💰 Ganancia Neta",
+                        f"${ganancia_neta:,.2f}",
+                        delta=f"${ganancia_neta:,.2f}",
+                    )
