@@ -24,6 +24,9 @@ with tab_cliente:
             df = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
             
             df['Codigo'] = df['Codigo'].astype(str).str.strip()
+            df['Cargo'] = pd.to_numeric(df['Cargo'], errors='coerce').fillna(0.0)
+            df['Abono'] = pd.to_numeric(df['Abono'], errors='coerce').fillna(0.0)
+            
             codigo_buscado = str(codigo_cliente).strip()
             
             resultado = df[df['Codigo'] == codigo_buscado]
@@ -34,20 +37,20 @@ with tab_cliente:
                 nombre = resultado.iloc[0]['Nombre']
                 
                 # Buscamos si hay un movimiento de liquidación o corte anterior
-                # Si existe, tomamos solo los movimientos posteriores a ese corte para mantener la vista corta
                 indices_liquidacion = resultado[resultado['Concepto'].str.contains("Crédito anterior liquidado", case=False, na=False)].index
                 
                 if not indices_liquidacion.empty:
-                    # Nos quedamos solo con los movimientos desde el último corte en adelante
                     ultimo_corte_idx = indices_liquidacion[-1]
                     resultado_visible = resultado.loc[resultado.index > ultimo_corte_idx]
                 else:
                     resultado_visible = resultado
                 
-                # Los cálculos totales de deuda/abonos siguen tomando TODO el historial global del cliente
+                # Los cálculos totales de deuda/abonos toman todo el historial global del cliente
                 total_cargos = resultado['Cargo'].sum()
                 total_pagos = resultado['Abono'].sum()
-                saldo_pendiente = total_cargos - total_pagos
+                
+                # Protección para evitar saldos negativos si se abonó de más
+                saldo_pendiente = max(0.0, total_cargos - total_pagos)
                 
                 st.subheader(f"Cliente: {nombre}")
                 
@@ -148,6 +151,7 @@ with tab_admin:
                             
                             sheet.append_row(fila_nueva)
                             st.success(f"✅ ¡Registrado correctamente para {nuevo_nombre}!")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar: {e}")
                     else:
@@ -175,7 +179,6 @@ with tab_admin:
                         spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
                         sheet = client.open_by_url(spreadsheet_url).sheet1
                         
-                        # Añadimos una fila especial de corte que no afecta los montos ($0 de cargo y abono)
                         fecha_hoy = datetime.now().strftime("%Y-%m-%d")
                         fila_corte = [
                             fecha_hoy,
@@ -188,6 +191,7 @@ with tab_admin:
                         
                         sheet.append_row(fila_corte)
                         st.success(f"✅ ¡Corte aplicado con éxito para {nombre_liq}! Su historial visual ahora está limpio y corto.")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Error al aplicar el corte: {e}")
             else:
@@ -202,13 +206,20 @@ with tab_admin:
                 df_finanzas = conn.read(ttl=0, usecols=['Fecha', 'Codigo', 'Nombre', 'Concepto', 'Cargo', 'Abono'])
                 
                 if not df_finanzas.empty:
+                    df_finanzas['Cargo'] = pd.to_numeric(df_finanzas['Cargo'], errors='coerce').fillna(0.0)
+                    df_finanzas['Abono'] = pd.to_numeric(df_finanzas['Abono'], errors='coerce').fillna(0.0)
+                    
                     resumen_clientes = df_finanzas.groupby(['Codigo', 'Nombre']).agg(
                         Total_Cargos=('Cargo', 'sum'),
                         Total_Abonos=('Abono', 'sum')
                     ).reset_index()
                     
-                    resumen_clientes['Saldo_Pendiente'] = resumen_clientes['Total_Cargos'] - resumen_clientes['Total_Abonos']
+                    # Saldo individual protegido contra negativos
+                    resumen_clientes['Saldo_Pendiente'] = resumen_clientes.apply(
+                        lambda row: max(0.0, row['Total_Cargos'] - row['Total_Abonos']), axis=1
+                    )
                     
+                    # Suma de la calle protegida
                     saldo_en_la_calle = resumen_clientes['Saldo_Pendiente'].sum()
                     total_recaudado = resumen_clientes['Total_Abonos'].sum()
                     
