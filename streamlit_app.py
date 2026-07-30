@@ -158,10 +158,10 @@ with tab_admin:
             df_existente = pd.DataFrame()
 
         # ------------------------------------------
-        # 1. REGISTRAR MOVIMIENTOS
+        # 1. REGISTRAR MOVIMIENTOS (DIARIOS / SEMANALES)
         # ------------------------------------------
         if seccion_admin == "Registrar Movimientos":
-            st.subheader("Registrar Cobro (Abono) o Préstamo")
+            st.subheader("Registrar Cobro (Diario/Semanal) o Préstamo")
 
             tipo_movimiento = st.radio(
                 "Tipo de movimiento:",
@@ -203,6 +203,14 @@ with tab_admin:
             with st.form("formulario_registro"):
                 nueva_fecha = st.date_input("Fecha del movimiento", datetime.now())
 
+                # Modalidad de Cobro para Abonos
+                tipo_cobro_abono = "Abono General"
+                if tipo_movimiento == "Registrar Abono / Pago":
+                    tipo_cobro_abono = st.selectbox(
+                        "Modalidad de Cobro:",
+                        ["Cobro Diario", "Cobro Semanal", "Abono General / Libre"]
+                    )
+
                 # Montos
                 monto = 0.0
                 monto_total_calculado = 0.0
@@ -234,28 +242,36 @@ with tab_admin:
 
                     monto_total_calculado = monto_c1 + monto_c2
                 else:
-                    monto = st.number_input("Monto ($)", min_value=0.0, value=0.0)
+                    monto = st.number_input("Monto del Abono / Préstamo ($)", min_value=0.0, value=0.0)
 
-                # Condiciones si es Préstamo
+                # Condiciones si es Préstamo (Frecuencia diaria / semanal)
                 tasa_interes = 0.0
                 dias_prestamo = 0
                 monto_interes_calc = 0.0
+                frecuencia_pago = "Diario"
+                num_cuotas = 1
+                valor_cuota_calc = 0.0
 
                 if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
-                    st.markdown("##### 📈 Condiciones del Préstamo")
-                    col_p1, col_p2 = st.columns(2)
+                    st.markdown("##### 📈 Condiciones y Frecuencia del Préstamo")
+                    col_p1, col_p2, col_p3 = st.columns(3)
                     tasa_interes = col_p1.number_input("Tasa de Interés (%)", min_value=0.0, value=0.0, step=1.0)
-                    dias_prestamo = col_p2.number_input("Días del Préstamo", min_value=1, value=30, step=1)
+                    frecuencia_pago = col_p2.selectbox("Frecuencia de Cobro", ["Diario", "Semanal", "Quincenal", "Mensual"])
+                    num_cuotas = col_p3.number_input("Número de Cuotas", min_value=1, value=24 if frecuencia_pago=="Diario" else (4 if frecuencia_pago=="Semanal" else 1), step=1)
                     
+                    dias_prestamo = num_cuotas if frecuencia_pago == "Diario" else (num_cuotas * 7 if frecuencia_pago == "Semanal" else num_cuotas * 30)
+
                     monto_base_calc = monto_total_calculado if usar_dos_cuentas else monto
                     monto_interes_calc = monto_base_calc * (tasa_interes / 100)
                     deuda_total_calc = monto_base_calc + monto_interes_calc
+                    valor_cuota_calc = deuda_total_calc / num_cuotas if num_cuotas > 0 else 0.0
 
                     if monto_base_calc > 0:
                         st.info(
-                            f"💵 **Capital (Sale de tus cuentas):** ${monto_base_calc:,.2f} \n\n"
+                            f"💵 **Capital Prestado:** ${monto_base_calc:,.2f} \n\n"
                             f"📈 **Interés a cobrar:** ${monto_interes_calc:,.2f} \n\n"
-                            f"⚠️ **Total Deuda del Cliente:** ${deuda_total_calc:,.2f}"
+                            f"⚠️ **Deuda Total Cliente:** ${deuda_total_calc:,.2f} \n\n"
+                            f"📅 **Plan de Cobro:** {num_cuotas} cuotas {frecuencia_pago.lower()}s de **${valor_cuota_calc:,.2f}** c/u"
                         )
 
                 concepto_personalizado = st.text_input(
@@ -281,7 +297,11 @@ with tab_admin:
                             sheet = client.open_by_url(spreadsheet_url).sheet1
 
                             filas_a_agregar = []
-                            desc_base = concepto_personalizado if concepto_personalizado else ("Préstamo" if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" else "Abono a cuenta")
+                            
+                            if tipo_movimiento == "Registrar Abono / Pago":
+                                desc_base = f"{tipo_cobro_abono}" + (f" - {concepto_personalizado}" if concepto_personalizado else "")
+                            else:
+                                desc_base = f"Préstamo {frecuencia_pago} ({num_cuotas} cuotas de ${valor_cuota_calc:,.2f})" + (f" - {concepto_personalizado}" if concepto_personalizado else "")
 
                             if usar_dos_cuentas:
                                 if monto_total_calculado <= 0:
@@ -309,14 +329,14 @@ with tab_admin:
                                 else:
                                     filas_a_agregar.append([nueva_fecha.strftime("%Y-%m-%d"), str(nuevo_codigo).strip(), nuevo_nombre, f"{desc_base} (Salida de {cuenta_afectada})", float(monto), 0.0])
 
-                            # AGREGAR EL INTERÉS COMO LÍNEA SEPARADA (Si es préstamo y hay %)
+                            # REGISTRAR EL INTERÉS COMO LÍNEA SEPARADA (Si es préstamo)
                             if tipo_movimiento == "Registrar Préstamo / Deuda Inicial" and monto_interes_calc > 0:
                                 filas_a_agregar.append(
                                     [
                                         nueva_fecha.strftime("%Y-%m-%d"),
                                         str(nuevo_codigo).strip(),
                                         nuevo_nombre,
-                                        f"Interés aplicado al préstamo ({tasa_interes}% por {dias_prestamo} días)",
+                                        f"Interés aplicado al préstamo ({tasa_interes}% - {frecuencia_pago})",
                                         float(monto_interes_calc),
                                         0.0,
                                     ]
@@ -538,14 +558,13 @@ with tab_admin:
                 st.info("No hay clientes registrados.")
 
         # ------------------------------------------
-        # 6. CIERRE DE MES (NUEVO MÓDULO)
+        # 6. CIERRE DE MES
         # ------------------------------------------
         elif seccion_admin == "Cierre de Mes":
             st.subheader("📅 Cierre de Mes y Reportes")
             st.write("Genera un resumen financiero mensual para ver tu rendimiento, ganancias reales y gastos incurridos.")
 
             if not df_existente.empty:
-                # Convertimos las fechas para agrupar por mes
                 df_existente['Fecha'] = pd.to_datetime(df_existente['Fecha'], errors='coerce')
                 df_valido = df_existente.dropna(subset=['Fecha']).copy()
                 
@@ -556,11 +575,9 @@ with tab_admin:
                     mes_seleccionado = st.selectbox("Selecciona el mes a evaluar:", meses_disponibles)
                     df_mes = df_valido[df_valido['Mes_Año'] == mes_seleccionado]
 
-                    # Cálculos del Mes
                     gastos_mes = df_mes[df_mes["Codigo"].str.contains("GASTO_", na=False)]["Cargo"].sum()
                     intereses_mes = df_mes[df_mes["Concepto"].str.contains("Interés aplicado", case=False, na=False)]["Cargo"].sum()
                     
-                    # Capital prestado (Salidas a clientes, excluye intereses)
                     prestamos_mes = df_mes[
                         (~df_mes["Codigo"].str.contains("CUENTA_|GASTO_|CAJA_", na=False)) & 
                         (~df_mes["Concepto"].str.contains("Interés aplicado", case=False, na=False))
@@ -571,33 +588,27 @@ with tab_admin:
                     ]["Abono"].sum()
 
                     inyecciones_mes = df_mes[df_mes["Codigo"].str.contains("CAJA_", na=False)]["Abono"].sum()
-                    
-                    # Fórmula de ganancia: Lo ganado (intereses) menos lo perdido/gastado (gastos)
                     ganancia_neta_estimada = intereses_mes - gastos_mes
 
                     st.markdown(f"### 📊 Resumen Financiero de **{mes_seleccionado}**")
                     
-                    # Fila 1: Rendimiento
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}", help="El interés total sumado a la deuda de los clientes este mes.")
-                    c2.metric("📉 Gastos del Mes", f"${gastos_mes:,.2f}", help="Dinero gastado que ya se descontó de las cuentas.")
+                    c1.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}")
+                    c2.metric("📉 Gastos del Mes", f"${gastos_mes:,.2f}")
                     c3.metric("💰 Ganancia Neta (Mes)", f"${ganancia_neta_estimada:,.2f}", 
-                              help="Intereses generados menos los gastos del mes.",
                               delta=f"${ganancia_neta_estimada:,.2f}", delta_color="normal")
 
                     st.divider()
                     
-                    # Fila 2: Movimiento de capital
                     c4, c5, c6 = st.columns(3)
-                    c4.metric("📤 Capital Prestado", f"${prestamos_mes:,.2f}", help="Dinero puro que salió a la calle este mes (sin contar intereses).")
-                    c5.metric("📥 Dinero Recaudado", f"${cobrado_mes:,.2f}", help="Abonos o pagos recibidos de clientes este mes.")
-                    c6.metric("💼 Inyecciones de Capital", f"${inyecciones_mes:,.2f}", help="Dinero extra que inyectaste al negocio este mes.")
+                    c4.metric("📤 Capital Prestado", f"${prestamos_mes:,.2f}")
+                    c5.metric("📥 Dinero Recaudado", f"${cobrado_mes:,.2f}")
+                    c6.metric("💼 Inyecciones de Capital", f"${inyecciones_mes:,.2f}")
 
                     st.divider()
                     st.subheader("📝 Detalle de Gastos del Mes")
                     df_gastos_mes = df_mes[df_mes["Codigo"].str.contains("GASTO_", na=False)]
                     if not df_gastos_mes.empty:
-                        # Mostramos fecha solo como texto para evitar errores visuales
                         df_gastos_mes['Fecha'] = df_gastos_mes['Fecha'].dt.strftime('%Y-%m-%d')
                         st.dataframe(df_gastos_mes[["Fecha", "Concepto", "Cargo"]], use_container_width=True, hide_index=True)
                     else:
@@ -634,7 +645,6 @@ with tab_admin:
 
                     total_abonos_general = df_existente["Abono"].sum()
 
-                    # Las fórmulas de las cuentas YA DESCUENTAN los gastos registrados
                     efectivo_total = (
                         df_existente[
                             df_existente["Concepto"].str.contains("Efectivo", case=False, na=False) |
@@ -672,7 +682,6 @@ with tab_admin:
                         df_existente["Codigo"].str.contains("GASTO_", na=False)
                     ]["Cargo"].sum()
 
-                    # CÁLCULO DE LA CARTERA TOTAL
                     total_caja = efectivo_total + pago_movil_total + binance_total
                     cartera_total = total_caja + saldo_en_la_calle
 
@@ -683,8 +692,8 @@ with tab_admin:
                         f"${cartera_total:,.2f}", 
                         help="Es la suma del dinero que tienes en bancos/efectivo MÁS el dinero que te deben en la calle."
                     )
-                    col_w2.metric("🏦 Total en Cajas / Cuentas", f"${total_caja:,.2f}", help="Dinero físico o líquido listo para usar.")
-                    col_w3.metric("📌 Dinero en la Calle", f"${saldo_en_la_calle:,.2f}", help="Deuda total pendiente de los clientes.")
+                    col_w2.metric("🏦 Total en Cajas / Cuentas", f"${total_caja:,.2f}")
+                    col_w3.metric("📌 Dinero en la Calle", f"${saldo_en_la_calle:,.2f}")
 
                     st.divider()
                     st.markdown("### 🏦 Detalle de Cuentas *(Ya descuentan los gastos)*")
@@ -695,7 +704,7 @@ with tab_admin:
 
                     st.divider()
                     col_f2, col_f3 = st.columns(2)
-                    col_f2.metric("📉 Gastos Históricos Totales", f"${total_gastos:,.2f}", help="Dinero que ha salido de la cartera por motivos de gastos.")
+                    col_f2.metric("📉 Gastos Históricos Totales", f"${total_gastos:,.2f}")
                     col_f3.metric("💵 Total Histórico Recaudado", f"${total_abonos_general:,.2f}")
 
                     st.divider()
