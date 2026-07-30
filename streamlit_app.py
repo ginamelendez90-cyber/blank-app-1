@@ -53,10 +53,11 @@ def obtener_hoja(nombre_hoja="Sheet1"):
     client = obtener_cliente_gspread()
     url = st.secrets["connections"]["gsheets"]["spreadsheet"]
     sh = client.open_by_url(url)
-    try:
-        return sh.worksheet(nombre_hoja)
-    except Exception:
-        if nombre_hoja == "PAGOS_PENDIENTES":
+
+    if nombre_hoja == "PAGOS_PENDIENTES":
+        try:
+            return sh.worksheet("PAGOS_PENDIENTES")
+        except Exception:
             ws = sh.add_worksheet(
                 title="PAGOS_PENDIENTES", rows="1000", cols="10"
             )
@@ -73,7 +74,15 @@ def obtener_hoja(nombre_hoja="Sheet1"):
                 ]
             )
             return ws
-        raise
+
+    # Búsqueda adaptativa para la hoja principal (evita errores por idioma)
+    try:
+        return sh.worksheet(nombre_hoja)
+    except Exception:
+        try:
+            return sh.worksheet("Hoja 1")
+        except Exception:
+            return sh.get_worksheet(0)
 
 
 def calcular_saldo_cuenta(df, cuenta_nombre):
@@ -124,7 +133,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.7")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.8")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -443,8 +452,8 @@ else:
                                     use_container_width=True,
                                 ):
                                     try:
-                                        # 1. Agregar a la hoja principal (Sheet1)
-                                        sheet_principal = obtener_hoja("Sheet1")
+                                        # 1. Agregar a la hoja principal de datos
+                                        sheet_principal = obtener_hoja()
                                         sheet_principal.append_row(
                                             [
                                                 str(fila["Fecha"]),
@@ -796,7 +805,7 @@ else:
                     if btn_guardar:
                         if nuevo_codigo and nuevo_nombre:
                             try:
-                                sheet = obtener_hoja("Sheet1")
+                                sheet = obtener_hoja()
                                 filas_a_agregar = []
 
                                 desc_base = (
@@ -925,7 +934,7 @@ else:
                         "💾 Registrar Capital", use_container_width=True
                     ):
                         try:
-                            sheet = obtener_hoja("Sheet1")
+                            sheet = obtener_hoja()
                             is_inyeccion = "Inyectar" in tipo_op_capital
 
                             fila = [
@@ -966,7 +975,7 @@ else:
                             st.error("⚠️ Las cuentas deben ser distintas.")
                         else:
                             try:
-                                sheet = obtener_hoja("Sheet1")
+                                sheet = obtener_hoja()
                                 sheet.append_row(
                                     [
                                         ftr.strftime("%Y-%m-%d"),
@@ -1011,7 +1020,7 @@ else:
                     ):
                         if dga:
                             try:
-                                sheet = obtener_hoja("Sheet1")
+                                sheet = obtener_hoja()
                                 sheet.append_row(
                                     [
                                         fga.strftime("%Y-%m-%d"),
@@ -1045,7 +1054,7 @@ else:
                         use_container_width=True,
                     ):
                         try:
-                            sheet = obtener_hoja("Sheet1")
+                            sheet = obtener_hoja()
                             sheet.append_row(
                                 [
                                     datetime.now().strftime("%Y-%m-%d"),
