@@ -3,9 +3,7 @@ from google.oauth2.service_account import Credentials
 import gspread
 import pandas as pd
 import streamlit as st
-from streamlit_gsheets import (
-    GSheetsConnection,  # <--- Make sure this import is present
-)
+from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(page_title="Sistema de Cobros y Finanzas", page_icon="💰")
 st.title("Sistema de Gestión Financiera y Cobros")
@@ -41,7 +39,8 @@ with tab_cliente:
         )
       except:
         df = conn.read(
-            ttl=0, usecols=["Fecha", "Codigo", "Nombre", "Concepto", "Cargo", "Abono"]
+            ttl=0,
+            usecols=["Fecha", "Codigo", "Nombre", "Concepto", "Cargo", "Abono"],
         )
         df["Cuenta"] = "Efectivo"
 
@@ -128,7 +127,9 @@ with tab_cliente:
                 hide_index=True,
             )
       else:
-        st.error("Código no encontrado. Por favor verifique e intente nuevamente.")
+        st.error(
+            "Código no encontrado. Por favor verifique e intente nuevamente."
+        )
     else:
       st.warning("Por favor ingrese un código válido.")
 
@@ -234,7 +235,8 @@ with tab_admin:
       if not usar_dos_cuentas:
         if tipo_movimiento == "Registrar Abono / Pago":
           cuenta_afectada = st.selectbox(
-              "¿A qué cuenta ingresa el pago?", ["Efectivo", "Pago Móvil", "Binance"]
+              "¿A qué cuenta ingresa el pago?",
+              ["Efectivo", "Pago Móvil", "Binance"],
           )
         else:
           cuenta_afectada = st.selectbox(
@@ -423,9 +425,12 @@ with tab_admin:
       with st.form("form_inyectar"):
         fecha_inyeccion = st.date_input("Fecha de inyección", datetime.now())
         cuenta_destino_iny = st.selectbox(
-            "¿A qué cuenta ingresa el dinero?", ["Efectivo", "Pago Móvil", "Binance"]
+            "¿A qué cuenta ingresa el dinero?",
+            ["Efectivo", "Pago Móvil", "Binance"],
         )
-        monto_iny = st.number_input("Monto a inyectar ($)", min_value=0.0, value=0.0)
+        monto_iny = st.number_input(
+            "Monto a inyectar ($)", min_value=0.0, value=0.0
+        )
         desc_iny = st.text_input("Nota / Descripción")
         btn_inyectar = st.form_submit_button("Ingresar Dinero a Caja")
 
@@ -609,8 +614,9 @@ with tab_admin:
           except Exception as e:
             st.error(f"Error: {e}")
       else:
+        st.info("No hay clientes.")
 
-          # ------------------------------------------
+    # ------------------------------------------
     # 6. FLUJO DE CAJA Y CUENTAS
     # ------------------------------------------
     else:
@@ -670,7 +676,10 @@ with tab_admin:
 
           resumen_clientes = pd.DataFrame(lista_resumen_clientes)
 
-          if not resumen_clientes.empty and "Saldo_Pendiente" in resumen_clientes.columns:
+          if (
+              not resumen_clientes.empty
+              and "Saldo_Pendiente" in resumen_clientes.columns
+          ):
             saldo_en_la_calle = resumen_clientes["Saldo_Pendiente"].sum()
           else:
             saldo_en_la_calle = 0.0
@@ -724,7 +733,10 @@ with tab_admin:
 
           st.divider()
           st.subheader("Estado de Cuenta de Clientes")
-          if not resumen_clientes.empty and "Saldo_Pendiente" in resumen_clientes.columns:
+          if (
+              not resumen_clientes.empty
+              and "Saldo_Pendiente" in resumen_clientes.columns
+          ):
             st.dataframe(
                 resumen_clientes[[
                     "Codigo",
@@ -737,12 +749,14 @@ with tab_admin:
                 hide_index=True,
             )
           else:
-            st.info("No hay datos suficientes de clientes para mostrar la tabla.")
+            st.info(
+                "No hay datos suficientes de clientes para mostrar la tabla."
+            )
         else:
           st.info("Aún no hay registros en la hoja de cálculo.")
       except Exception as e:
         st.error(f"Error cargando el flujo de caja: {e}")
-        st.info("No hay clientes.")
 
-    
-            
+  else:
+    if clave_admin != "":
+      st.error("Contraseña incorrecta.")
