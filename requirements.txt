@@ -1,4 +1,7 @@
-streamlit
-pandas
 st-gsheets-connection
 gspread
+streamlit
+streamlit-gsheets
+google-auth
+pandas
+plotly
