@@ -3,6 +3,9 @@ from google.oauth2.service_account import Credentials
 import gspread
 import pandas as pd
 import streamlit as st
+from streamlit_gsheets import (
+    GSheetsConnection,  # <--- Make sure this import is present
+)
 
 st.set_page_config(page_title="Sistema de Cobros y Finanzas", page_icon="💰")
 st.title("Sistema de Gestión Financiera y Cobros")
