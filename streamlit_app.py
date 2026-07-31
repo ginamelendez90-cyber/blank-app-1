@@ -634,7 +634,7 @@ else:
                     cartera_total = total_caja + saldo_en_la_calle
 
                     # Generar enlaces directos de reporte para cada cliente
-                    URL_BASE_APP = "https://tu-app.streamlit.app"  # Reemplaza con la URL real de tu app
+                    URL_BASE_APP = "https://blank-app-0gbuv8hf31pb.streamlit.app/"  # Reemplaza con la URL real de tu app
                     resumen_clientes["Enlace_Reporte"] = (
                         URL_BASE_APP
                         + "/?cliente="
