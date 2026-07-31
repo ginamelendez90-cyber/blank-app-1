@@ -1151,20 +1151,37 @@ else:
                     mes_sel = st.selectbox("Seleccionar Mes:", meses)
                     df_mes = df_valido[df_valido["Mes_Año"] == mes_sel]
 
+                    # 1. Calcular Gastos Operativos
                     gastos_mes = df_mes[
                         df_mes["Codigo"].str.contains("GASTO_", na=False)
                     ]["Cargo"].sum()
+                    
+                    # 2. Calcular Intereses Generados
                     intereses_mes = df_mes[
                         df_mes["Concepto"].str.contains(
                             "Interés aplicado", case=False, na=False
                         )
                     ]["Cargo"].sum()
+
+                    # 3. Calcular Total Prestado (NUEVO)
+                    # Filtramos solo movimientos de clientes (excluye cajas, cuentas y gastos)
+                    df_clientes_mes = df_mes[
+                        ~df_mes["Codigo"].str.contains("CUENTA_|GASTO_|CAJA_", na=False)
+                    ]
+                    # Sumamos los cargos de los clientes excluyendo el monto de interés
+                    prestado_mes = df_clientes_mes[
+                        ~df_clientes_mes["Concepto"].str.contains("Interés aplicado", case=False, na=False)
+                    ]["Cargo"].sum()
+
+                    # 4. Calcular Ganancia Neta
                     ganancia_neta = intereses_mes - gastos_mes
 
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}")
-                    m2.metric("📉 Gastos Operativos", f"${gastos_mes:,.2f}")
-                    m3.metric(
+                    # Mostrar métricas en 4 columnas
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("💸 Capital Prestado", f"${prestado_mes:,.2f}")
+                    m2.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}")
+                    m3.metric("📉 Gastos Operativos", f"${gastos_mes:,.2f}")
+                    m4.metric(
                         "💰 Ganancia Neta",
                         f"${ganancia_neta:,.2f}",
                         delta=f"${ganancia_neta:,.2f}",
