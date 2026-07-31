@@ -11,7 +11,7 @@ from streamlit_gsheets import GSheetsConnection
 # CONFIGURACIÓN GENERAL
 # ==========================================
 # ⚠️ TU NÚMERO DE TELEFONO (Código de país + número sin espacio ni '+'):
-TELEFONO_ADMIN = "584120000000"  # Ej: 584121234567
+TELEFONO_ADMIN = "584123801615"  # Ej: 584121234567
 
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
