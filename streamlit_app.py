@@ -143,7 +143,7 @@ st.sidebar.subheader("🔒 Acceso Admin")
 clave_admin = st.sidebar.text_input(
     "Contraseña:", type="password", key="clave_admin_sidebar"
 )
-es_admin_autenticado = clave_admin == "admin123"
+es_admin_autenticado = clave_admin == "Kilometro12@"
 
 if es_admin_autenticado:
     st.sidebar.success("🟢 Sesión Activa")
