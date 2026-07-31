@@ -184,7 +184,7 @@ if modo_vista == "👤 Portal del Cliente":
     nombre_autocompletado = ""
     if codigo_url:
         try:
-            df_temp = conn.read(ttl=60, usecols=["Codigo", "Nombre"])
+            df_temp = conn.read(ttl=0, usecols=["Codigo", "Nombre"])
             df_temp["Codigo"] = (
                 df_temp["Codigo"].astype(str).str.strip().str.upper()
             )
