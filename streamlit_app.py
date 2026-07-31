@@ -1,4 +1,5 @@
 from datetime import datetime
+import urllib.parse
 import uuid
 from google.oauth2.service_account import Credentials
 import gspread
@@ -7,8 +8,11 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# CONFIGURACIÓN GENERAL Y TELÉFONO DE NOTIFICACIONES
 # ==========================================
+# ⚠️ CAMBIA ESTE NÚMERO POR EL TUYO (Incluye código de país sin el signo +, Ej: 584121234567)
+TELEFONO_ADMIN = "584120000000"
+
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
     page_icon="💳",
@@ -75,7 +79,6 @@ def obtener_hoja(nombre_hoja="Sheet1"):
             )
             return ws
 
-    # Búsqueda adaptativa para la hoja principal (evita errores por idioma)
     try:
         return sh.worksheet(nombre_hoja)
     except Exception:
@@ -133,7 +136,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.8")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.9")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -271,7 +274,7 @@ if modo_vista == "👤 Portal del Cliente":
                 except Exception as e:
                     st.error(f"Error de conexión: {e}")
 
-    # --- SUB-SECCIÓN: REPORTAR PAGO ---
+    # --- SUB-SECCIÓN: REPORTAR PAGO (CON NOTIFICACIÓN WHATSAPP) ---
     elif opcion_cliente == "📲 Reportar un Pago":
         st.subheader("📲 Formulario de Reporte de Pago")
         st.caption(
@@ -306,36 +309,68 @@ if modo_vista == "👤 Portal del Cliente":
                 use_container_width=True,
             )
 
-            if btn_enviar_reporte:
-                if cod_cli_rep and nom_cli_rep and num_ref and monto_rep > 0:
-                    try:
-                        sheet_pendientes = obtener_hoja("PAGOS_PENDIENTES")
-                        id_pago = f"PAG-{str(uuid.uuid4())[:6].upper()}"
+        if btn_enviar_reporte:
+            if cod_cli_rep and nom_cli_rep and num_ref and monto_rep > 0:
+                try:
+                    sheet_pendientes = obtener_hoja("PAGOS_PENDIENTES")
+                    id_pago = f"PAG-{str(uuid.uuid4())[:6].upper()}"
+                    codigo_clean = str(cod_cli_rep).strip().upper()
+                    nombre_clean = nom_cli_rep.strip()
+                    ref_clean = str(num_ref).strip()
+                    fecha_str = f_pago.strftime("%Y-%m-%d")
 
-                        sheet_pendientes.append_row(
-                            [
-                                id_pago,
-                                f_pago.strftime("%Y-%m-%d"),
-                                str(cod_cli_rep).strip().upper(),
-                                nom_cli_rep.strip(),
-                                cuenta_destino,
-                                str(num_ref).strip(),
-                                float(monto_rep),
-                                "PENDIENTE",
-                            ]
-                        )
-
-                        st.success(
-                            f"🎉 **¡Pago registrado con éxito!**\n\n"
-                            f"📌 **ID de Registro:** `{id_pago}`\n\n"
-                            f"Tu abono de **${monto_rep:,.2f}** está en proceso de verificación por el administrador."
-                        )
-                    except Exception as e:
-                        st.error(f"Error al enviar reporte: {e}")
-                else:
-                    st.warning(
-                        "⚠️ Por favor complete todos los campos obligatorios (Código, Nombre, Monto y Referencia)."
+                    # 1. Guardar en base de datos (Google Sheets)
+                    sheet_pendientes.append_row(
+                        [
+                            id_pago,
+                            fecha_str,
+                            codigo_clean,
+                            nombre_clean,
+                            cuenta_destino,
+                            ref_clean,
+                            float(monto_rep),
+                            "PENDIENTE",
+                        ]
                     )
+
+                    st.success(
+                        f"🎉 **¡Pago registrado en el sistema con éxito!**\n\n"
+                        f"📌 **ID de Registro:** `{id_pago}`\n\n"
+                        f"Tu abono de **${monto_rep:,.2f}** ha quedado guardado para verificación."
+                    )
+
+                    # 2. Generar Enlace de WhatsApp estructurado
+                    mensaje_wa = (
+                        f"👋 *NUEVO PAGO REPORTADO*\n\n"
+                        f"📌 *ID:* `{id_pago}`\n"
+                        f"👤 *Cliente:* {nombre_clean} (`{codigo_clean}`)\n"
+                        f"💵 *Monto:* ${monto_rep:,.2f}\n"
+                        f"🏦 *Medio:* {cuenta_destino}\n"
+                        f"🔢 *Referencia:* {ref_clean}\n"
+                        f"📅 *Fecha:* {fecha_str}\n\n"
+                        f"Quedo a la espera de su aprobación. ¡Gracias!"
+                    )
+
+                    text_encoded = urllib.parse.quote(mensaje_wa)
+                    url_wa = (
+                        f"https://wa.me/{TELEFONO_ADMIN}?text={text_encoded}"
+                    )
+
+                    st.info(
+                        "👉 **Paso final opcional:** Presiona el siguiente botón para notificar al administrador directamente por WhatsApp:"
+                    )
+                    st.link_button(
+                        "📲 Notificar por WhatsApp al Administrador",
+                        url_wa,
+                        use_container_width=True,
+                    )
+
+                except Exception as e:
+                    st.error(f"Error al enviar reporte: {e}")
+            else:
+                st.warning(
+                    "⚠️ Por favor complete todos los campos obligatorios (Código, Nombre, Monto y Referencia)."
+                )
 
 # ==========================================
 # PESTAÑA 2: PANEL DE ADMINISTRADOR
@@ -365,7 +400,6 @@ else:
 
         st.divider()
 
-        # Cargar datos base
         try:
             df_existente = conn.read(
                 ttl=0,
@@ -452,7 +486,6 @@ else:
                                     use_container_width=True,
                                 ):
                                     try:
-                                        # 1. Agregar a la hoja principal de datos
                                         sheet_principal = obtener_hoja()
                                         sheet_principal.append_row(
                                             [
@@ -465,7 +498,6 @@ else:
                                             ]
                                         )
 
-                                        # 2. Marcar como APROBADO en PAGOS_PENDIENTES
                                         cell = sheet_pendientes.find(
                                             str(fila["ID"])
                                         )
@@ -573,7 +605,6 @@ else:
 
                     st.divider()
 
-                    # MOVIMIENTOS PERSONALES DEL DUEÑO
                     df_caja_dueno = df_existente[
                         df_existente["Codigo"].str.contains("CAJA_", na=False)
                     ]
