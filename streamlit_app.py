@@ -11,7 +11,7 @@ from streamlit_gsheets import GSheetsConnection
 # CONFIGURACIÓN GENERAL Y TELÉFONO DE NOTIFICACIONES
 # ==========================================
 # ⚠️ CAMBIA ESTE NÚMERO POR EL TUYO (Incluye código de país sin el signo +, Ej: 584121234567)
-TELEFONO_ADMIN = "584120000000"
+TELEFONO_ADMIN = "584123801615"
 
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
