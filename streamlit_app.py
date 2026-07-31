@@ -8,10 +8,10 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# CONFIGURACIÓN GENERAL Y TELÉFONO DE NOTIFICACIONES
+# CONFIGURACIÓN GENERAL
 # ==========================================
-# ⚠️ CAMBIA ESTE NÚMERO POR EL TUYO (Incluye código de país sin el signo +, Ej: 584121234567)
-TELEFONO_ADMIN = "584123801615"
+# ⚠️ TU NÚMERO DE TELEFONO (Código de país + número sin espacio ni '+'):
+TELEFONO_ADMIN = "584120000000"  # Ej: 584121234567
 
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
@@ -136,7 +136,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v2.9")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.0")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -164,129 +164,167 @@ modo_vista = st.sidebar.radio(
 if modo_vista == "👤 Portal del Cliente":
     st.title("👤 Portal de Atención al Cliente")
 
+    # 1. LEER PARÁMETROS DE LA URL
+    query_params = st.query_params
+    codigo_url = query_params.get("cliente", "").strip().upper()
+    accion_url = query_params.get("accion", "").strip().lower()
+
+    # Si la URL indica 'accion=reportar', abre directamente la pestaña del formulario
+    index_defecto = 1 if accion_url == "reportar" else 0
+    opciones_menu = ["🔎 Consultar Estado de Cuenta", "📲 Reportar un Pago"]
+
     opcion_cliente = st.segmented_control(
         "¿Qué deseas realizar?:",
-        ["🔎 Consultar Estado de Cuenta", "📲 Reportar un Pago"],
-        default="🔎 Consultar Estado de Cuenta",
+        opciones_menu,
+        default=opciones_menu[index_defecto],
     )
     st.divider()
 
-    # --- SUB-SECCIÓN: CONSULTAR ESTADO ---
+    # Cargar nombre automático desde Google Sheets si el código está en la URL
+    nombre_autocompletado = ""
+    if codigo_url:
+        try:
+            df_temp = conn.read(ttl=60, usecols=["Codigo", "Nombre"])
+            df_temp["Codigo"] = (
+                df_temp["Codigo"].astype(str).str.strip().str.upper()
+            )
+            match = df_temp[df_temp["Codigo"] == codigo_url]
+            if not match.empty:
+                nombre_autocompletado = match.iloc[0]["Nombre"]
+        except Exception:
+            pass
+
+    # --- SUB-SECCIÓN 1: CONSULTAR ESTADO ---
     if opcion_cliente == "🔎 Consultar Estado de Cuenta":
         st.write("Consulta el estado actual de tu crédito y tu historial.")
 
         with st.container(border=True):
             col_busq1, col_busq2 = st.columns([3, 1])
             codigo_cliente = col_busq1.text_input(
-                "Ingrese su Código de Cliente:", placeholder="Ej. CLI-001"
+                "Ingrese su Código de Cliente:",
+                value=codigo_url,
+                placeholder="Ej. CLI-001",
             )
             btn_consultar = col_busq2.button(
                 "🔎 Consultar", use_container_width=True
             )
 
-        if btn_consultar or codigo_cliente:
-            if codigo_cliente:
-                try:
-                    df = conn.read(
-                        ttl=0,
-                        usecols=[
-                            "Fecha",
-                            "Codigo",
-                            "Nombre",
-                            "Concepto",
-                            "Cargo",
-                            "Abono",
-                        ],
+        # Consulta automática si el cliente entra desde su enlace personalizado
+        hacer_busqueda = btn_consultar or (codigo_url != "")
+
+        if hacer_busqueda and codigo_cliente:
+            try:
+                df = conn.read(
+                    ttl=0,
+                    usecols=[
+                        "Fecha",
+                        "Codigo",
+                        "Nombre",
+                        "Concepto",
+                        "Cargo",
+                        "Abono",
+                    ],
+                )
+                df["Codigo"] = df["Codigo"].astype(str).str.strip()
+                resultado = df[df["Codigo"] == str(codigo_cliente).strip()]
+
+                if not resultado.empty:
+                    nombre = resultado.iloc[0]["Nombre"]
+                    total_cargos_historico = resultado["Cargo"].sum()
+
+                    indices_liq = resultado[
+                        resultado["Concepto"].str.contains(
+                            "Crédito anterior liquidado",
+                            case=False,
+                            na=False,
+                        )
+                    ].index
+
+                    if not indices_liq.empty:
+                        ult_idx = indices_liq[-1]
+                        mov_actuales = resultado.loc[resultado.index > ult_idx]
+                        mov_historicos = resultado.loc[
+                            resultado.index <= ult_idx
+                        ]
+                    else:
+                        mov_actuales = resultado
+                        mov_historicos = pd.DataFrame()
+
+                    prestamo_actual = mov_actuales["Cargo"].sum()
+                    pagos_actual = mov_actuales["Abono"].sum()
+                    saldo_pendiente = prestamo_actual - pagos_actual
+
+                    st.subheader(f"Bienvenido/a, **{nombre}**")
+
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric(
+                        "📌 Deuda Total Actual", f"${prestamo_actual:,.2f}"
                     )
-                    df["Codigo"] = df["Codigo"].astype(str).str.strip()
-                    resultado = df[df["Codigo"] == str(codigo_cliente).strip()]
+                    m2.metric("💵 Total Abonado", f"${pagos_actual:,.2f}")
+                    m3.metric(
+                        "⚠️ Saldo Pendiente",
+                        f"${saldo_pendiente:,.2f}",
+                        delta=f"-${saldo_pendiente:,.2f}",
+                        delta_color="inverse",
+                    )
 
-                    if not resultado.empty:
-                        nombre = resultado.iloc[0]["Nombre"]
-                        total_cargos_historico = resultado["Cargo"].sum()
+                    st.caption(
+                        f"📊 *Acumulado histórico total: ${total_cargos_historico:,.2f}*"
+                    )
 
-                        indices_liq = resultado[
-                            resultado["Concepto"].str.contains(
-                                "Crédito anterior liquidado",
-                                case=False,
-                                na=False,
-                            )
-                        ].index
-
-                        if not indices_liq.empty:
-                            ult_idx = indices_liq[-1]
-                            mov_actuales = resultado.loc[
-                                resultado.index > ult_idx
-                            ]
-                            mov_historicos = resultado.loc[
-                                resultado.index <= ult_idx
-                            ]
-                        else:
-                            mov_actuales = resultado
-                            mov_historicos = pd.DataFrame()
-
-                        prestamo_actual = mov_actuales["Cargo"].sum()
-                        pagos_actual = mov_actuales["Abono"].sum()
-                        saldo_pendiente = prestamo_actual - pagos_actual
-
-                        st.subheader(f"Bienvenido/a, **{nombre}**")
-
-                        m1, m2, m3 = st.columns(3)
-                        m1.metric(
-                            "📌 Deuda Total Actual", f"${prestamo_actual:,.2f}"
-                        )
-                        m2.metric("💵 Total Abonado", f"${pagos_actual:,.2f}")
-                        m3.metric(
-                            "⚠️ Saldo Pendiente",
-                            f"${saldo_pendiente:,.2f}",
-                            delta=f"-${saldo_pendiente:,.2f}",
-                            delta_color="inverse",
+                    st.divider()
+                    st.subheader("📋 Historial del Crédito Vigente")
+                    if not mov_actuales.empty:
+                        st.dataframe(
+                            mov_actuales[
+                                ["Fecha", "Concepto", "Cargo", "Abono"]
+                            ],
+                            use_container_width=True,
+                            hide_index=True,
                         )
 
-                        st.caption(
-                            f"📊 *Acumulado histórico total: ${total_cargos_historico:,.2f}*"
-                        )
-
-                        st.divider()
-                        st.subheader("📋 Historial del Crédito Vigente")
-                        if not mov_actuales.empty:
+                    if not mov_historicos.empty:
+                        with st.expander(
+                            "📂 Ver Historial de Créditos Liquidados"
+                        ):
                             st.dataframe(
-                                mov_actuales[
+                                mov_historicos[
                                     ["Fecha", "Concepto", "Cargo", "Abono"]
                                 ],
                                 use_container_width=True,
                                 hide_index=True,
                             )
+                else:
+                    st.error("❌ Código no encontrado.")
+            except Exception as e:
+                st.error(f"Error de conexión: {e}")
 
-                        if not mov_historicos.empty:
-                            with st.expander(
-                                "📂 Ver Historial de Créditos Liquidados"
-                            ):
-                                st.dataframe(
-                                    mov_historicos[
-                                        ["Fecha", "Concepto", "Cargo", "Abono"]
-                                    ],
-                                    use_container_width=True,
-                                    hide_index=True,
-                                )
-                    else:
-                        st.error("❌ Código no encontrado.")
-                except Exception as e:
-                    st.error(f"Error de conexión: {e}")
-
-    # --- SUB-SECCIÓN: REPORTAR PAGO (CON NOTIFICACIÓN WHATSAPP) ---
+    # --- SUB-SECCIÓN 2: REPORTAR PAGO (AUTOCOMPLETADO Y WA.ME) ---
     elif opcion_cliente == "📲 Reportar un Pago":
         st.subheader("📲 Formulario de Reporte de Pago")
         st.caption(
-            "Registra tu transferencia o pago móvil aquí para que sea validado por el administrador."
+            "Registra tu transferencia o pago móvil aquí para notificar al administrador."
         )
+
+        if codigo_url:
+            st.info(
+                f"✨ **Formulario activado para el cliente:** `{codigo_url}`"
+            )
 
         with st.form("form_reportar_pago_cliente", border=True):
             col_p1, col_p2 = st.columns(2)
+
             cod_cli_rep = col_p1.text_input(
-                "Tu Código de Cliente (Ej: CLI-001):"
+                "Tu Código de Cliente:",
+                value=codigo_url,
+                placeholder="Ej. CLI-001",
+                disabled=True if codigo_url else False,
             )
-            nom_cli_rep = col_p2.text_input("Tu Nombre Completo:")
+            nom_cli_rep = col_p2.text_input(
+                "Tu Nombre Completo:",
+                value=nombre_autocompletado,
+                placeholder="Ej. Juan Pérez",
+            )
 
             col_p3, col_p4 = st.columns(2)
             f_pago = col_p3.date_input("Fecha del Pago", datetime.now())
@@ -305,21 +343,23 @@ if modo_vista == "👤 Portal del Cliente":
             )
 
             btn_enviar_reporte = st.form_submit_button(
-                "📤 Enviar Comprobante para Verificación",
+                "💾 Registrar Pago y Preparar WhatsApp",
                 use_container_width=True,
             )
 
+        codigo_final = codigo_url if codigo_url else cod_cli_rep
+
         if btn_enviar_reporte:
-            if cod_cli_rep and nom_cli_rep and num_ref and monto_rep > 0:
+            if codigo_final and nom_cli_rep and num_ref and monto_rep > 0:
                 try:
                     sheet_pendientes = obtener_hoja("PAGOS_PENDIENTES")
                     id_pago = f"PAG-{str(uuid.uuid4())[:6].upper()}"
-                    codigo_clean = str(cod_cli_rep).strip().upper()
+                    codigo_clean = str(codigo_final).strip().upper()
                     nombre_clean = nom_cli_rep.strip()
                     ref_clean = str(num_ref).strip()
                     fecha_str = f_pago.strftime("%Y-%m-%d")
 
-                    # 1. Guardar en base de datos (Google Sheets)
+                    # 1. Guardar registro en Google Sheets
                     sheet_pendientes.append_row(
                         [
                             id_pago,
@@ -335,41 +375,47 @@ if modo_vista == "👤 Portal del Cliente":
 
                     st.success(
                         f"🎉 **¡Pago registrado en el sistema con éxito!**\n\n"
-                        f"📌 **ID de Registro:** `{id_pago}`\n\n"
-                        f"Tu abono de **${monto_rep:,.2f}** ha quedado guardado para verificación."
+                        f"📌 **ID de Registro:** `{id_pago}`"
                     )
 
-                    # 2. Generar Enlace de WhatsApp estructurado
+                    # 2. Generar enlace directo de WhatsApp (wa.me)
                     mensaje_wa = (
                         f"👋 *NUEVO PAGO REPORTADO*\n\n"
-                        f"📌 *ID:* `{id_pago}`\n"
-                        f"👤 *Cliente:* {nombre_clean} (`{codigo_clean}`)\n"
+                        f"📌 *ID:* {id_pago}\n"
+                        f"👤 *Cliente:* {nombre_clean} ({codigo_clean})\n"
                         f"💵 *Monto:* ${monto_rep:,.2f}\n"
                         f"🏦 *Medio:* {cuenta_destino}\n"
                         f"🔢 *Referencia:* {ref_clean}\n"
-                        f"📅 *Fecha:* {fecha_str}\n\n"
-                        f"Quedo a la espera de su aprobación. ¡Gracias!"
+                        f"📅 *Fecha:* {fecha_str}"
                     )
+                    mensaje_encoded = urllib.parse.quote(mensaje_wa)
+                    link_wame = f"https://wa.me/{TELEFONO_ADMIN}?text={mensaje_encoded}"
 
-                    text_encoded = urllib.parse.quote(mensaje_wa)
-                    url_wa = (
-                        f"https://wa.me/{TELEFONO_ADMIN}?text={text_encoded}"
-                    )
-
-                    st.info(
-                        "👉 **Paso final opcional:** Presiona el siguiente botón para notificar al administrador directamente por WhatsApp:"
-                    )
-                    st.link_button(
-                        "📲 Notificar por WhatsApp al Administrador",
-                        url_wa,
-                        use_container_width=True,
+                    st.markdown(
+                        f"""
+                        <a href="{link_wame}" target="_blank" style="text-decoration: none;">
+                            <div style="
+                                background-color: #25D366;
+                                color: white;
+                                padding: 14px 20px;
+                                text-align: center;
+                                font-weight: bold;
+                                font-size: 16px;
+                                border-radius: 8px;
+                                margin-top: 10px;
+                                cursor: pointer;">
+                                📤 Enviar Comprobante por WhatsApp 📲
+                            </div>
+                        </a>
+                        """,
+                        unsafe_allow_html=True,
                     )
 
                 except Exception as e:
-                    st.error(f"Error al enviar reporte: {e}")
+                    st.error(f"Error al enviar el reporte: {e}")
             else:
                 st.warning(
-                    "⚠️ Por favor complete todos los campos obligatorios (Código, Nombre, Monto y Referencia)."
+                    "⚠️ Por favor completa todos los campos obligatorios (Nombre, Monto y Referencia)."
                 )
 
 # ==========================================
@@ -435,7 +481,7 @@ else:
             df_existente = pd.DataFrame()
 
         # ------------------------------------------
-        # 1. ABONOS POR VERIFICAR (APROBACIÓN DE CLIENTES)
+        # 1. ABONOS POR VERIFICAR
         # ------------------------------------------
         if seccion_admin == "⏳ Abonos por Verificar":
             st.subheader("⏳ Confirmación de Pagos Reportados por Clientes")
@@ -542,13 +588,10 @@ else:
                         "🎉 ¡Todo al día! No hay pagos pendientes por verificar."
                     )
             except Exception as e:
-                st.error(
-                    f"Error al cargar la hoja de PAGOS_PENDIENTES: {e}. "
-                    "Asegúrate de que la segunda pestaña exista en Google Sheets."
-                )
+                st.error(f"Error al cargar pagos pendientes: {e}")
 
         # ------------------------------------------
-        # 2. FLUJO DE CAJA Y DASHBOARD
+        # 2. FLUJO DE CAJA Y CARTERA
         # ------------------------------------------
         elif seccion_admin == "📊 Flujo de Caja":
             try:
@@ -590,6 +633,15 @@ else:
                     )
                     cartera_total = total_caja + saldo_en_la_calle
 
+                    # Generar enlaces directos de reporte para cada cliente
+                    URL_BASE_APP = "https://tu-app.streamlit.app"  # Reemplaza con la URL real de tu app
+                    resumen_clientes["Enlace_Reporte"] = (
+                        URL_BASE_APP
+                        + "/?cliente="
+                        + resumen_clientes["Codigo"]
+                        + "&accion=reportar"
+                    )
+
                     c_car1, c_car2, c_car3 = st.columns(3)
                     c_car1.metric(
                         "💎 Capital Total (Patrimonio)",
@@ -602,34 +654,6 @@ else:
                         "📌 Dinero Prestado en Calle",
                         f"${saldo_en_la_calle:,.2f}",
                     )
-
-                    st.divider()
-
-                    df_caja_dueno = df_existente[
-                        df_existente["Codigo"].str.contains("CAJA_", na=False)
-                    ]
-                    total_inyecciones_dueno = df_caja_dueno["Abono"].sum()
-                    total_retiros_dueno = df_caja_dueno["Cargo"].sum()
-                    balance_dueno = (
-                        total_inyecciones_dueno - total_retiros_dueno
-                    )
-
-                    with st.expander(
-                        "👤 Ver Histórico de Movimientos de Capital del Dueño (Aportes vs Retiros)",
-                        expanded=False,
-                    ):
-                        cd1, cd2, cd3 = st.columns(3)
-                        cd1.metric(
-                            "📥 Capital Inyectado",
-                            f"${total_inyecciones_dueno:,.2f}",
-                        )
-                        cd2.metric(
-                            "📤 Capital Retirado (Personal)",
-                            f"${total_retiros_dueno:,.2f}",
-                        )
-                        cd3.metric(
-                            "⚖️ Balance Neto Dueño", f"${balance_dueno:,.2f}"
-                        )
 
                     st.divider()
 
@@ -667,7 +691,7 @@ else:
                             )
 
                     st.divider()
-                    st.subheader("👥 Cartera de Clientes y Saldos")
+                    st.subheader("👥 Cartera de Clientes y Enlaces Directos")
                     st.dataframe(
                         resumen_clientes[
                             [
@@ -676,8 +700,15 @@ else:
                                 "Total_Cargos",
                                 "Total_Abonos",
                                 "Saldo_Pendiente",
+                                "Enlace_Reporte",
                             ]
                         ],
+                        column_config={
+                            "Enlace_Reporte": st.column_config.LinkColumn(
+                                "Link de Reporte Pago",
+                                display_text="Copiar Link 🔗",
+                            )
+                        },
                         use_container_width=True,
                         hide_index=True,
                     )
@@ -946,7 +977,7 @@ else:
                     "Operación:",
                     [
                         "📥 Inyectar Capital (Ingresar dinero)",
-                        "📤 Retirar Capital (Uso Personal sin recargo)",
+                        "📤 Retirar Capital (Uso Personal)",
                     ],
                     horizontal=True,
                 )
