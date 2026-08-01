@@ -10,8 +10,7 @@ from streamlit_gsheets import GSheetsConnection
 # ==========================================
 # CONFIGURACIÓN GENERAL
 # ==========================================
-# ⚠️ TU NÚMERO DE TELEFONO (Código de país + número sin espacio ni '+'):
-TELEFONO_ADMIN = "584123801615"  # Ej: 584121234567
+TELEFONO_ADMIN = "584123801615"  # Tu número de contacto sin '+'
 
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
@@ -136,7 +135,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.0")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.1")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -164,12 +163,10 @@ modo_vista = st.sidebar.radio(
 if modo_vista == "👤 Portal del Cliente":
     st.title("👤 Portal de Atención al Cliente")
 
-    # 1. LEER PARÁMETROS DE LA URL
     query_params = st.query_params
     codigo_url = query_params.get("cliente", "").strip().upper()
     accion_url = query_params.get("accion", "").strip().lower()
 
-    # Si la URL indica 'accion=reportar', abre directamente la pestaña del formulario
     index_defecto = 1 if accion_url == "reportar" else 0
     opciones_menu = ["🔎 Consultar Estado de Cuenta", "📲 Reportar un Pago"]
 
@@ -180,7 +177,6 @@ if modo_vista == "👤 Portal del Cliente":
     )
     st.divider()
 
-    # Cargar nombre automático desde Google Sheets si el código está en la URL
     nombre_autocompletado = ""
     if codigo_url:
         try:
@@ -194,7 +190,6 @@ if modo_vista == "👤 Portal del Cliente":
         except Exception:
             pass
 
-    # --- SUB-SECCIÓN 1: CONSULTAR ESTADO ---
     if opcion_cliente == "🔎 Consultar Estado de Cuenta":
         st.write("Consulta el estado actual de tu crédito y tu historial.")
 
@@ -209,7 +204,6 @@ if modo_vista == "👤 Portal del Cliente":
                 "🔎 Consultar", use_container_width=True
             )
 
-        # Consulta automática si el cliente entra desde su enlace personalizado
         hacer_busqueda = btn_consultar or (codigo_url != "")
 
         if hacer_busqueda and codigo_cliente:
@@ -299,7 +293,6 @@ if modo_vista == "👤 Portal del Cliente":
             except Exception as e:
                 st.error(f"Error de conexión: {e}")
 
-    # --- SUB-SECCIÓN 2: REPORTAR PAGO (AUTOCOMPLETADO Y WA.ME) ---
     elif opcion_cliente == "📲 Reportar un Pago":
         st.subheader("📲 Formulario de Reporte de Pago")
         st.caption(
@@ -359,7 +352,6 @@ if modo_vista == "👤 Portal del Cliente":
                     ref_clean = str(num_ref).strip()
                     fecha_str = f_pago.strftime("%Y-%m-%d")
 
-                    # 1. Guardar registro en Google Sheets
                     sheet_pendientes.append_row(
                         [
                             id_pago,
@@ -373,12 +365,13 @@ if modo_vista == "👤 Portal del Cliente":
                         ]
                     )
 
+                    st.cache_data.clear()
+
                     st.success(
                         f"🎉 **¡Pago registrado en el sistema con éxito!**\n\n"
                         f"📌 **ID de Registro:** `{id_pago}`"
                     )
 
-                    # 2. Generar enlace directo de WhatsApp (wa.me)
                     mensaje_wa = (
                         f"👋 *NUEVO PAGO REPORTADO*\n\n"
                         f"📌 *ID:* {id_pago}\n"
@@ -514,7 +507,7 @@ else:
                                 c1.caption(f"Código: {fila['Codigo']}")
 
                                 c2.markdown(
-                                    f"💵 **Monto:**\n# ${float(fila['Monto']):,.2f}"
+                                    f"💵 **Monto:**\n${float(fila['Monto']):,.2f}"
                                 )
                                 c2.caption(f"Vía: {fila['Cuenta']}")
 
@@ -525,7 +518,6 @@ else:
 
                                 col_b1, col_b2 = c4.columns(2)
 
-                                # BOTÓN APROBAR
                                 if col_b1.button(
                                     "✅ Aprobar",
                                     key=f"app_{fila['ID']}",
@@ -550,6 +542,7 @@ else:
                                         sheet_pendientes.update_cell(
                                             cell.row, 8, "APROBADO"
                                         )
+                                        st.cache_data.clear()
 
                                         st.toast(
                                             f"✅ Pago de {fila['Nombre']} por ${fila['Monto']} aprobado",
@@ -559,7 +552,6 @@ else:
                                     except Exception as ex:
                                         st.error(f"Error al aprobar: {ex}")
 
-                                # BOTÓN RECHAZAR
                                 if col_b2.button(
                                     "❌ Rechazar",
                                     key=f"rej_{fila['ID']}",
@@ -572,6 +564,8 @@ else:
                                         sheet_pendientes.update_cell(
                                             cell.row, 8, "RECHAZADO"
                                         )
+                                        st.cache_data.clear()
+
                                         st.toast(
                                             f"❌ Pago de {fila['Nombre']} rechazado.",
                                             icon="⚠️",
@@ -591,11 +585,12 @@ else:
                 st.error(f"Error al cargar pagos pendientes: {e}")
 
         # ------------------------------------------
-        # 2. FLUJO DE CAJA Y CARTERA
+        # 2. FLUJO DE CAJA Y CARTERA (CON RESUMEN DIARIO)
         # ------------------------------------------
         elif seccion_admin == "📊 Flujo de Caja":
             try:
                 if not df_existente.empty:
+                    # Totales Generales
                     df_clientes = df_existente[
                         ~df_existente["Codigo"].str.contains(
                             "CUENTA_|GASTO_|CAJA_", na=False
@@ -633,8 +628,7 @@ else:
                     )
                     cartera_total = total_caja + saldo_en_la_calle
 
-                    # Generar enlaces directos de reporte para cada cliente
-                    URL_BASE_APP = "https://blank-app-0gbuv8hf31pb.streamlit.app/"  # Reemplaza con la URL real de tu app
+                    URL_BASE_APP = "https://blank-app-0gbuv8hf31pb.streamlit.app/"
                     resumen_clientes["Enlace_Reporte"] = (
                         URL_BASE_APP
                         + "/?cliente="
@@ -642,6 +636,7 @@ else:
                         + "&accion=reportar"
                     )
 
+                    # --- MÉTRICAS DE PATRIMONIO ---
                     c_car1, c_car2, c_car3 = st.columns(3)
                     c_car1.metric(
                         "💎 Capital Total (Patrimonio)",
@@ -657,6 +652,143 @@ else:
 
                     st.divider()
 
+                    # ==========================================
+                    # 📅 RESUMEN DIARIO (COBROS Y GASTOS DÍA A DÍA)
+                    # ==========================================
+                    st.subheader("📅 Resumen Diario de Flujo de Caja")
+                    st.caption(
+                        "Registro acumulado día a día de cobros recibidos, gastos operativos y préstamos entregados."
+                    )
+
+                    df_diario_raw = df_existente.copy()
+                    df_diario_raw["Fecha_Clean"] = pd.to_datetime(
+                        df_diario_raw["Fecha"], errors="coerce"
+                    ).dt.strftime("%Y-%m-%d")
+
+                    es_cli = ~df_diario_raw["Codigo"].str.contains(
+                        "CUENTA_|GASTO_|CAJA_", na=False
+                    )
+                    es_gas = df_diario_raw["Codigo"].str.contains(
+                        "GASTO_", na=False
+                    )
+
+                    # Cobros diarios (Abonos de clientes)
+                    cobros_df = (
+                        df_diario_raw[es_cli]
+                        .groupby("Fecha_Clean")["Abono"]
+                        .sum()
+                        .rename("Cobros del Día ($)")
+                    )
+
+                    # Gastos diarios
+                    gastos_df = (
+                        df_diario_raw[es_gas]
+                        .groupby("Fecha_Clean")["Cargo"]
+                        .sum()
+                        .rename("Gastos del Día ($)")
+                    )
+
+                    # Préstamos entregados diarios (excluye registros de interés puro)
+                    prestamos_df = (
+                        df_diario_raw[
+                            es_cli
+                            & (
+                                ~df_diario_raw["Concepto"].str.contains(
+                                    "Interés aplicado", case=False, na=False
+                                )
+                            )
+                        ]
+                        .groupby("Fecha_Clean")["Cargo"]
+                        .sum()
+                        .rename("Préstamos Entregados ($)")
+                    )
+
+                    # Combinar en tabla general
+                    df_resumen_diario = pd.concat(
+                        [cobros_df, gastos_df, prestamos_df], axis=1
+                    ).fillna(0)
+
+                    # Calcular Flujo Neto = Cobros - Gastos - Préstamos
+                    df_resumen_diario["Flujo Neto ($)"] = (
+                        df_resumen_diario["Cobros del Día ($)"]
+                        - df_resumen_diario["Gastos del Día ($)"]
+                        - df_resumen_diario["Préstamos Entregados ($)"]
+                    )
+
+                    df_resumen_diario = df_resumen_diario.sort_index(
+                        ascending=False
+                    )
+
+                    # Métricas de la jornada de HOY
+                    hoy_str = datetime.now().strftime("%Y-%m-%d")
+                    cobros_hoy = (
+                        df_resumen_diario.loc[hoy_str, "Cobros del Día ($)"]
+                        if hoy_str in df_resumen_diario.index
+                        else 0.0
+                    )
+                    gastos_hoy = (
+                        df_resumen_diario.loc[hoy_str, "Gastos del Día ($)"]
+                        if hoy_str in df_resumen_diario.index
+                        else 0.0
+                    )
+                    neto_hoy = (
+                        df_resumen_diario.loc[hoy_str, "Flujo Neto ($)"]
+                        if hoy_str in df_resumen_diario.index
+                        else 0.0
+                    )
+
+                    with st.container(border=True):
+                        st.markdown(f"#### 🟢 Jornada de Hoy (`{hoy_str}`)")
+                        d_col1, d_col2, d_col3 = st.columns(3)
+                        d_col1.metric("💵 Cobrado Hoy", f"${cobros_hoy:,.2f}")
+                        d_col2.metric("📉 Gastado Hoy", f"${gastos_hoy:,.2f}")
+                        d_col3.metric(
+                            "💰 Flujo Neto de Hoy",
+                            f"${neto_hoy:,.2f}",
+                            delta=f"${neto_hoy:,.2f}",
+                        )
+
+                    col_tabla_d, col_grafico_d = st.columns([1.3, 1])
+
+                    with col_tabla_d:
+                        with st.container(border=True):
+                            st.markdown("#### 📋 Histórico Diario")
+                            st.dataframe(
+                                df_resumen_diario.reset_index().rename(
+                                    columns={"Fecha_Clean": "Fecha"}
+                                ),
+                                column_config={
+                                    "Fecha": st.column_config.TextColumn("Fecha"),
+                                    "Cobros del Día ($)": st.column_config.NumberColumn(
+                                        format="$%.2f"
+                                    ),
+                                    "Gastos del Día ($)": st.column_config.NumberColumn(
+                                        format="$%.2f"
+                                    ),
+                                    "Préstamos Entregados ($)": st.column_config.NumberColumn(
+                                        format="$%.2f"
+                                    ),
+                                    "Flujo Neto ($)": st.column_config.NumberColumn(
+                                        format="$%.2f"
+                                    ),
+                                },
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+                    with col_grafico_d:
+                        with st.container(border=True):
+                            st.markdown("#### 📈 Tendencia: Cobros vs Gastos")
+                            if not df_resumen_diario.empty:
+                                st.line_chart(
+                                    df_resumen_diario[
+                                        ["Cobros del Día ($)", "Gastos del Día ($)"]
+                                    ]
+                                )
+
+                    st.divider()
+
+                    # Distribución de Cajas y Cartera
                     col_chart, col_cuentas = st.columns([1.2, 1])
                     with col_chart:
                         with st.container(border=True):
@@ -955,6 +1087,8 @@ else:
                                 for fila in filas_a_agregar:
                                     sheet.append_row(fila)
 
+                                st.cache_data.clear()
+
                                 st.toast(
                                     f"🎉 Movimiento guardado para {nuevo_nombre}",
                                     icon="✅",
@@ -1009,6 +1143,8 @@ else:
                                 float(m_cap) if is_inyeccion else 0.0,
                             ]
                             sheet.append_row(fila)
+                            st.cache_data.clear()
+
                             st.toast("✅ Capital registrado", icon="💼")
                             st.rerun()
                         except Exception as e:
@@ -1058,6 +1194,8 @@ else:
                                         float(mtr),
                                     ]
                                 )
+                                st.cache_data.clear()
+
                                 st.toast("✅ Transferencia realizada", icon="🔄")
                                 st.rerun()
                             except Exception as e:
@@ -1093,6 +1231,8 @@ else:
                                         0.0,
                                     ]
                                 )
+                                st.cache_data.clear()
+
                                 st.toast("✅ Gasto registrado", icon="📉")
                                 st.rerun()
                             except Exception as e:
@@ -1127,6 +1267,8 @@ else:
                                     0.0,
                                 ]
                             )
+                            st.cache_data.clear()
+
                             st.toast(
                                 f"✅ Crédito cerrado para {nom_liq}", icon="✂️"
                             )
@@ -1151,32 +1293,25 @@ else:
                     mes_sel = st.selectbox("Seleccionar Mes:", meses)
                     df_mes = df_valido[df_valido["Mes_Año"] == mes_sel]
 
-                    # 1. Calcular Gastos Operativos
                     gastos_mes = df_mes[
                         df_mes["Codigo"].str.contains("GASTO_", na=False)
                     ]["Cargo"].sum()
-                    
-                    # 2. Calcular Intereses Generados
+
                     intereses_mes = df_mes[
                         df_mes["Concepto"].str.contains(
                             "Interés aplicado", case=False, na=False
                         )
                     ]["Cargo"].sum()
 
-                    # 3. Calcular Total Prestado (NUEVO)
-                    # Filtramos solo movimientos de clientes (excluye cajas, cuentas y gastos)
                     df_clientes_mes = df_mes[
                         ~df_mes["Codigo"].str.contains("CUENTA_|GASTO_|CAJA_", na=False)
                     ]
-                    # Sumamos los cargos de los clientes excluyendo el monto de interés
                     prestado_mes = df_clientes_mes[
                         ~df_clientes_mes["Concepto"].str.contains("Interés aplicado", case=False, na=False)
                     ]["Cargo"].sum()
 
-                    # 4. Calcular Ganancia Neta
                     ganancia_neta = intereses_mes - gastos_mes
 
-                    # Mostrar métricas en 4 columnas
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("💸 Capital Prestado", f"${prestado_mes:,.2f}")
                     m2.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}")
