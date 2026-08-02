@@ -227,7 +227,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v4.0")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v4.1")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -416,7 +416,7 @@ if modo_vista == "👤 Portal del Cliente":
                         prestamo_vis, pagos_vis, saldo_vis = 0.0, 0.0, 0.0
 
                     # ----------------------------------------------------
-                    # LÓGICA DE ESTATUS: AL DÍA VS ATRASADO (EXCLUYE DOMINGOS Y FESTIVOS)
+                    # LÓGICA DE ESTATUS: AL DÍA VS ATRASADO (EXCLUYE DOMINGOS, FESTIVOS Y APLICA 1 DÍA DE GRACIA)
                     # ----------------------------------------------------
                     estado_cliente = "🟢 AL DÍA"
                     detalle_estatus = "Su crédito está al día."
@@ -437,18 +437,17 @@ if modo_vista == "👤 Portal del Cliente":
 
                             frecuencia_lower = concepto_p.lower()
 
+                            # Descuenta 1 día por concepto de GRACIA
+                            dias_cobro = max(0, calcular_dias_cobro_acumulados(f_inicio, f_hoy) - 1)
+
                             if "semanal" in frecuencia_lower:
-                                dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
                                 cuotas_esperadas = min(dias_cobro // 6, num_cuotas_p)
                             elif "quincenal" in frecuencia_lower:
-                                dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
                                 cuotas_esperadas = min(dias_cobro // 12, num_cuotas_p)
                             elif "mensual" in frecuencia_lower:
-                                dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
                                 cuotas_esperadas = min(dias_cobro // 24, num_cuotas_p)
                             else:
-                                # Diario por defecto (omite domingos y feriados)
-                                dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                # Diario por defecto
                                 cuotas_esperadas = min(dias_cobro, num_cuotas_p)
 
                             monto_esperado_hoy = cuotas_esperadas * cuota_monto_vis
@@ -456,7 +455,7 @@ if modo_vista == "👤 Portal del Cliente":
 
                             if diferencia_pago >= -0.05:
                                 estado_cliente = "🟢 AL DÍA"
-                                detalle_estatus = f"Has cubierto tus cuotas a la fecha ({cuotas_esperadas} cuota(s) transcurridas)."
+                                detalle_estatus = f"Has cubierto tus cuotas a la fecha (1 día de gracia incluido)."
                                 color_estatus = "success"
                             else:
                                 monto_atraso = abs(diferencia_pago)
@@ -843,11 +842,11 @@ else:
                 st.error(f"Error al cargar pagos pendientes: {e}")
 
         # ------------------------------------------
-        # 2. CLIENTES ATRASADOS
+        # 2. CLIENTES ATRASADOS (CON 1 DÍA DE GRACIA)
         # ------------------------------------------
         elif seccion_admin == "🚨 Clientes Atrasados":
             st.subheader("🚨 Control de Clientes en Arreos / Atrasados")
-            st.caption("Listado consolidado de clientes con cuotas pendientes a la fecha (excluyendo domingos y feriados).")
+            st.caption("Listado consolidado de clientes con cuotas pendientes (excluye domingos, feriados e incluye 1 día de gracia).")
 
             try:
                 if not df_existente.empty:
@@ -920,18 +919,17 @@ else:
 
                                 frecuencia_lower = concepto_p.lower()
 
+                                # APLICA 1 DÍA DE GRACIA DESCONTANDO 1 DÍA HÁBIL
+                                dias_cobro = max(0, calcular_dias_cobro_acumulados(f_inicio, f_hoy) - 1)
+
                                 if "semanal" in frecuencia_lower:
-                                    dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
                                     cuotas_esperadas = min(dias_cobro // 6, num_cuotas_p)
                                 elif "quincenal" in frecuencia_lower:
-                                    dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
                                     cuotas_esperadas = min(dias_cobro // 12, num_cuotas_p)
                                 elif "mensual" in frecuencia_lower:
-                                    dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
                                     cuotas_esperadas = min(dias_cobro // 24, num_cuotas_p)
                                 else:
                                     # Diario
-                                    dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
                                     cuotas_esperadas = min(dias_cobro, num_cuotas_p)
 
                                 monto_esperado_hoy = cuotas_esperadas * cuota_monto_vis
@@ -1006,7 +1004,7 @@ else:
                                     unsafe_allow_html=True
                                 )
                     else:
-                        st.success("🎉 ¡Excelente! No hay clientes con retraso de pago actualmente.")
+                        st.success("🎉 ¡Excelente! No hay clientes con retraso de pago actualmente (considerando el día de gracia).")
             except Exception as e:
                 st.error(f"Error al calcular la lista de clientes atrasados: {e}")
 
