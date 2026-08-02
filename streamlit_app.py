@@ -681,6 +681,7 @@ else:
             "Seleccione una sección:",
             [
                 "⏳ Abonos por Verificar",
+                "🚨 Clientes Atrasados",
                 "📊 Flujo de Caja",
                 "➕ Registrar Movimiento Directo",
                 "🤝 Préstamos Externos",
@@ -842,7 +843,175 @@ else:
                 st.error(f"Error al cargar pagos pendientes: {e}")
 
         # ------------------------------------------
-        # 2. FLUJO DE CAJA Y CARTERA
+        # 2. CLIENTES ATRASADOS
+        # ------------------------------------------
+        elif seccion_admin == "🚨 Clientes Atrasados":
+            st.subheader("🚨 Control de Clientes en Arreos / Atrasados")
+            st.caption("Listado consolidado de clientes con cuotas pendientes a la fecha (excluyendo domingos y feriados).")
+
+            try:
+                if not df_existente.empty:
+                    df_clientes = df_existente[
+                        ~df_existente["Codigo"].str.contains(
+                            "CUENTA_|GASTO_|CAJA_|PASIVO_EXT", na=False
+                        )
+                    ]
+
+                    codigos_unicos = df_clientes["Codigo"].unique()
+                    lista_atrasados = []
+                    f_hoy = datetime.now().date()
+
+                    for cod in codigos_unicos:
+                        cod_clean = str(cod).strip().upper()
+                        resultado = df_clientes[df_clientes["Codigo"] == cod_clean]
+
+                        if resultado.empty:
+                            continue
+
+                        nombre = resultado.iloc[0]["Nombre"]
+                        es_cliente_bs = cod_clean in lista_clientes_bs
+                        moneda_label = "Bs." if es_cliente_bs else "$"
+
+                        # Separa ciclo actual de créditos históricos
+                        indices_liq = resultado[
+                            resultado["Concepto"].str.contains("Crédito anterior liquidado", case=False, na=False)
+                        ].index
+
+                        if not indices_liq.empty:
+                            ult_idx = indices_liq[-1]
+                            mov_actuales = resultado.loc[resultado.index > ult_idx].copy()
+                        else:
+                            mov_actuales = resultado.copy()
+
+                        if mov_actuales.empty:
+                            continue
+
+                        def calc_cargo(row):
+                            cargo = float(row["Cargo"])
+                            c_str = str(row["Concepto"]).lower()
+                            if es_cliente_bs:
+                                if "interés aplicado" in c_str or "interes aplicado" in c_str:
+                                    return cargo * 1.75 * tasa_bs_usd
+                                return cargo * tasa_bs_usd
+                            return cargo
+
+                        def calc_abono(row):
+                            abono = float(row["Abono"])
+                            return abono * tasa_bs_usd if es_cliente_bs else abono
+
+                        mov_actuales["Cargo_Vis"] = mov_actuales.apply(calc_cargo, axis=1)
+                        mov_actuales["Abono_Vis"] = mov_actuales.apply(calc_abono, axis=1)
+
+                        prestamo_vis = mov_actuales["Cargo_Vis"].sum()
+                        pagos_vis = mov_actuales["Abono_Vis"].sum()
+                        saldo_vis = prestamo_vis - pagos_vis
+
+                        fila_prestamo = mov_actuales[mov_actuales["Concepto"].str.contains("Préstamo", case=False, na=False)]
+
+                        if not fila_prestamo.empty and saldo_vis > 0:
+                            try:
+                                f_str = str(fila_prestamo.iloc[0]["Fecha"])
+                                f_inicio = pd.to_datetime(f_str).date()
+                                concepto_p = str(fila_prestamo.iloc[0]["Concepto"])
+
+                                match_c = re.search(r'\((\d+)\s*cuotas', concepto_p, re.IGNORECASE)
+                                num_cuotas_p = int(match_c.group(1)) if match_c else 24
+                                cuota_monto_vis = prestamo_vis / num_cuotas_p if num_cuotas_p > 0 else prestamo_vis
+
+                                frecuencia_lower = concepto_p.lower()
+
+                                if "semanal" in frecuencia_lower:
+                                    dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                    cuotas_esperadas = min(dias_cobro // 6, num_cuotas_p)
+                                elif "quincenal" in frecuencia_lower:
+                                    dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                    cuotas_esperadas = min(dias_cobro // 12, num_cuotas_p)
+                                elif "mensual" in frecuencia_lower:
+                                    dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                    cuotas_esperadas = min(dias_cobro // 24, num_cuotas_p)
+                                else:
+                                    # Diario
+                                    dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                    cuotas_esperadas = min(dias_cobro, num_cuotas_p)
+
+                                monto_esperado_hoy = cuotas_esperadas * cuota_monto_vis
+                                diferencia_pago = pagos_vis - monto_esperado_hoy
+
+                                if diferencia_pago < -0.05:
+                                    monto_atraso = abs(diferencia_pago)
+                                    cuotas_atrasadas = max(1, int(monto_atraso // cuota_monto_vis) if cuota_monto_vis > 0 else 1)
+
+                                    msg_wa = urllib.parse.quote(
+                                        f"Hola {nombre}, te saludamos de la administración. Te recordamos que tu crédito presenta un retraso de {cuotas_atrasadas} cuota(s) ({moneda_label} {monto_atraso:,.2f}). Por favor confírmanos tu pago. ¡Muchas gracias!"
+                                    )
+
+                                    lista_atrasados.append({
+                                        "Código": cod_clean,
+                                        "Cliente": nombre,
+                                        "Moneda": "Bolívares" if es_cliente_bs else "Dólares",
+                                        "Cuotas Atrasadas": cuotas_atrasadas,
+                                        "Monto Atraso": monto_atraso,
+                                        "Saldo Pendiente": saldo_vis,
+                                        "Valor Cuota": cuota_monto_vis,
+                                        "Símbolo": moneda_label,
+                                        "WhatsApp_Msg": msg_wa
+                                    })
+                            except Exception:
+                                pass
+
+                    if lista_atrasados:
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("🚨 Clientes Atrasados", f"{len(lista_atrasados)}")
+                        c2.metric(
+                            "💵 Total Mora en USD",
+                            f"${sum(x['Monto Atraso'] if x['Símbolo'] == '$' else x['Monto Atraso']/tasa_bs_usd for x in lista_atrasados):,.2f}"
+                        )
+                        c3.metric(
+                            "🇻🇪 Total Mora en Bs",
+                            f"Bs. {sum(x['Monto Atraso'] if x['Símbolo'] == 'Bs.' else x['Monto Atraso']*tasa_bs_usd for x in lista_atrasados):,.2f}"
+                        )
+
+                        st.divider()
+
+                        for atr in lista_atrasados:
+                            with st.container(border=True):
+                                col_a1, col_a2, col_a3, col_a4 = st.columns([2, 2, 2, 2])
+
+                                col_a1.markdown(f"👤 **{atr['Cliente']}**\n`{atr['Código']}`")
+                                col_a1.caption(f"Moneda: {atr['Moneda']}")
+
+                                col_a2.markdown(f"🔴 **Cuotas en Mora:** {atr['Cuotas Atrasadas']} cuota(s)")
+                                col_a2.caption(f"Valor cuota: {atr['Símbolo']} {atr['Valor Cuota']:,.2f}")
+
+                                col_a3.markdown(f"⚠️ **Monto Atrasado:**\n**{atr['Símbolo']} {atr['Monto Atraso']:,.2f}**")
+                                col_a3.caption(f"Saldo pendiente total: {atr['Símbolo']} {atr['Saldo Pendiente']:,.2f}")
+
+                                link_cobro_wa = f"https://wa.me/?text={atr['WhatsApp_Msg']}"
+                                col_a4.markdown(
+                                    f"""
+                                    <a href="{link_cobro_wa}" target="_blank" style="text-decoration: none;">
+                                        <div style="
+                                            background-color: #DC3545;
+                                            color: white;
+                                            padding: 10px;
+                                            text-align: center;
+                                            font-weight: bold;
+                                            font-size: 13px;
+                                            border-radius: 6px;
+                                            margin-top: 5px;">
+                                            📲 Recordar Cobro
+                                        </div>
+                                    </a>
+                                    """,
+                                    unsafe_allow_html=True
+                                )
+                    else:
+                        st.success("🎉 ¡Excelente! No hay clientes con retraso de pago actualmente.")
+            except Exception as e:
+                st.error(f"Error al calcular la lista de clientes atrasados: {e}")
+
+        # ------------------------------------------
+        # 3. FLUJO DE CAJA Y CARTERA
         # ------------------------------------------
         elif seccion_admin == "📊 Flujo de Caja":
             try:
@@ -1110,7 +1279,7 @@ else:
                 st.error(f"Error al calcular flujo de caja: {e}")
 
         # ------------------------------------------
-        # 3. REGISTRAR MOVIMIENTO DIRECTO
+        # 4. REGISTRAR MOVIMIENTO DIRECTO
         # ------------------------------------------
         elif seccion_admin == "➕ Registrar Movimiento Directo":
             with st.container(border=True):
@@ -1419,7 +1588,7 @@ else:
                                 st.error(f"Error al guardar: {e}")
 
         # ------------------------------------------
-        # 4. PRÉSTAMOS EXTERNOS (PASIVOS)
+        # 5. PRÉSTAMOS EXTERNOS (PASIVOS)
         # ------------------------------------------
         elif seccion_admin == "🤝 Préstamos Externos":
             st.subheader("🤝 Gestión de Préstamos Recibidos de Personas Externas")
@@ -1542,7 +1711,7 @@ else:
                 st.info("💡 Aún no se han registrado préstamos de personas externas.")
 
         # ------------------------------------------
-        # 5. APORTES / RETIROS DUEÑO
+        # 6. APORTES / RETIROS DUEÑO
         # ------------------------------------------
         elif seccion_admin == "💼 Aportes / Retiros Dueño":
             with st.container(border=True):
@@ -1595,7 +1764,7 @@ else:
                             st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 6. TRANSFERENCIAS
+        # 7. TRANSFERENCIAS
         # ------------------------------------------
         elif seccion_admin == "🔄 Transferencias":
             with st.container(border=True):
@@ -1646,7 +1815,7 @@ else:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 7. GASTOS OPERATIVOS
+        # 8. GASTOS OPERATIVOS
         # ------------------------------------------
         elif seccion_admin == "📉 Gastos Operativos":
             with st.container(border=True):
@@ -1683,7 +1852,7 @@ else:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 8. LIQUIDAR CRÉDITO
+        # 9. LIQUIDAR CRÉDITO
         # ------------------------------------------
         elif seccion_admin == "✂️ Liquidar Crédito":
             with st.container(border=True):
@@ -1721,7 +1890,7 @@ else:
                             st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 9. CIERRE DE MES
+        # 10. CIERRE DE MES
         # ------------------------------------------
         elif seccion_admin == "📅 Cierre de Mes":
             st.subheader("📅 Reporte Financiero Mensual")
