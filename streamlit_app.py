@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timedelta, date
+import re
 import urllib.parse
 import uuid
 from google.oauth2.service_account import Credentials
@@ -8,9 +9,44 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# CONFIGURACIÓN GENERAL
+# CONFIGURACIÓN GENERAL Y HELPER DE FECHAS
 # ==========================================
 TELEFONO_ADMIN = "584123801615"
+
+def es_dia_cobro(fecha_obj):
+    """Devuelve False si es Domingo o Feriado Nacional."""
+    if fecha_obj.weekday() == 6:  # 6 = Domingo
+        return False
+    
+    # Días festivos fijos (Día, Mes)
+    festivos_fijos = [
+        (1, 1),   # Año Nuevo
+        (19, 4),  # Declaración de Independencia
+        (1, 5),   # Día del Trabajador
+        (24, 6),  # Batalla de Carabobo
+        (5, 7),   # Día de la Independencia
+        (24, 7),  # Natalicio de Simón Bolívar
+        (12, 10), # Día de la Resistencia Indígena
+        (24, 12), # Nochebuena
+        (25, 12), # Navidad
+        (31, 12)  # Fin de Año
+    ]
+    if (fecha_obj.day, fecha_obj.month) in festivos_fijos:
+        return False
+        
+    return True
+
+def calcular_dias_cobro_acumulados(fecha_inicio, fecha_fin):
+    """Cuenta los días hábiles de cobro transcurridos excluyendo domingos y feriados."""
+    if fecha_inicio >= fecha_fin:
+        return 0
+    dias_validos = 0
+    cur = fecha_inicio + timedelta(days=1)
+    while cur <= fecha_fin:
+        if es_dia_cobro(cur):
+            dias_validos += 1
+        cur += timedelta(days=1)
+    return dias_validos
 
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
@@ -191,7 +227,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.9")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v4.0")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -354,8 +390,6 @@ if modo_vista == "👤 Portal del Cliente":
                         mov_actuales = resultado.copy()
                         mov_historicos = pd.DataFrame()
 
-                    # LÓGICA DUAL: Si está en Bs, el interés guardado al 20% en el sistema
-                    # se proyecta al 35% multiplicando por (35/20 = 1.75) en su estado de cuenta.
                     def calcular_cargo_vista(row):
                         cargo = float(row["Cargo"])
                         concepto = str(row["Concepto"]).lower()
@@ -381,9 +415,67 @@ if modo_vista == "👤 Portal del Cliente":
                     else:
                         prestamo_vis, pagos_vis, saldo_vis = 0.0, 0.0, 0.0
 
+                    # ----------------------------------------------------
+                    # LÓGICA DE ESTATUS: AL DÍA VS ATRASADO (EXCLUYE DOMINGOS Y FESTIVOS)
+                    # ----------------------------------------------------
+                    estado_cliente = "🟢 AL DÍA"
+                    detalle_estatus = "Su crédito está al día."
+                    color_estatus = "success"
+
+                    fila_prestamo = mov_actuales[mov_actuales["Concepto"].str.contains("Préstamo", case=False, na=False)]
+
+                    if not fila_prestamo.empty and saldo_vis > 0:
+                        try:
+                            f_str = str(fila_prestamo.iloc[0]["Fecha"])
+                            f_inicio = pd.to_datetime(f_str).date()
+                            f_hoy = datetime.now().date()
+                            concepto_p = str(fila_prestamo.iloc[0]["Concepto"])
+
+                            match_c = re.search(r'\((\d+)\s*cuotas', concepto_p, re.IGNORECASE)
+                            num_cuotas_p = int(match_c.group(1)) if match_c else 24
+                            cuota_monto_vis = prestamo_vis / num_cuotas_p if num_cuotas_p > 0 else prestamo_vis
+
+                            frecuencia_lower = concepto_p.lower()
+
+                            if "semanal" in frecuencia_lower:
+                                dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                cuotas_esperadas = min(dias_cobro // 6, num_cuotas_p)
+                            elif "quincenal" in frecuencia_lower:
+                                dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                cuotas_esperadas = min(dias_cobro // 12, num_cuotas_p)
+                            elif "mensual" in frecuencia_lower:
+                                dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                cuotas_esperadas = min(dias_cobro // 24, num_cuotas_p)
+                            else:
+                                # Diario por defecto (omite domingos y feriados)
+                                dias_cobro = calcular_dias_cobro_acumulados(f_inicio, f_hoy)
+                                cuotas_esperadas = min(dias_cobro, num_cuotas_p)
+
+                            monto_esperado_hoy = cuotas_esperadas * cuota_monto_vis
+                            diferencia_pago = pagos_vis - monto_esperado_hoy
+
+                            if diferencia_pago >= -0.05:
+                                estado_cliente = "🟢 AL DÍA"
+                                detalle_estatus = f"Has cubierto tus cuotas a la fecha ({cuotas_esperadas} cuota(s) transcurridas)."
+                                color_estatus = "success"
+                            else:
+                                monto_atraso = abs(diferencia_pago)
+                                cuotas_atrasadas = max(1, int(monto_atraso // cuota_monto_vis) if cuota_monto_vis > 0 else 1)
+                                estado_cliente = "🔴 ATRASADO"
+                                detalle_estatus = f"Presentas un retraso de {cuotas_atrasadas} cuota(s) equivalente a {moneda_label} {monto_atraso:,.2f}."
+                                color_estatus = "error"
+                        except Exception:
+                            estado_cliente = "🟢 AL DÍA"
+                            detalle_estatus = "Crédito activo."
+                            color_estatus = "info"
+                    elif saldo_vis <= 0 and not mov_actuales.empty:
+                        estado_cliente = "✅ LIQUIDADO"
+                        detalle_estatus = "No tienes deudas pendientes."
+                        color_estatus = "success"
+
                     st.subheader(f"Bienvenido/a, **{nombre}**")
 
-                    m1, m2, m3 = st.columns(3)
+                    m1, m2, m3, m4 = st.columns(4)
                     m1.metric("📌 Deuda Total Actual", f"{moneda_label} {prestamo_vis:,.2f}")
                     m2.metric("💵 Total Abonado", f"{moneda_label} {pagos_vis:,.2f}")
                     m3.metric(
@@ -392,6 +484,14 @@ if modo_vista == "👤 Portal del Cliente":
                         delta=f"-{moneda_label} {saldo_vis:,.2f}",
                         delta_color="inverse",
                     )
+                    m4.metric("Estatus del Crédito", estado_cliente)
+
+                    if color_estatus == "error":
+                        st.error(f"⚠️ **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
+                    elif color_estatus == "success":
+                        st.success(f"🎉 **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
+                    else:
+                        st.info(f"ℹ️ **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
 
                     st.divider()
                     st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
@@ -497,7 +597,6 @@ if modo_vista == "👤 Portal del Cliente":
 
                     es_cliente_bs = codigo_final in lista_clientes_bs
 
-                    # Conversión a dólares usando la tasa registrada para el flujo de caja interno
                     if es_cliente_bs and "Bolívares" in moneda_pago:
                         monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 2)
                         detalle_referencia = f"{ref_clean} (Bs. {monto_reportado:,.2f} a tasa {tasa_bs_usd})"
@@ -1011,7 +1110,7 @@ else:
                 st.error(f"Error al calcular flujo de caja: {e}")
 
         # ------------------------------------------
-        # 3. REGISTRAR MOVIMIENTO DIRECTO (CON OPCIÓN DE MONEDA Y LÓGICA 35% BS)
+        # 3. REGISTRAR MOVIMIENTO DIRECTO
         # ------------------------------------------
         elif seccion_admin == "➕ Registrar Movimiento Directo":
             with st.container(border=True):
@@ -1146,7 +1245,7 @@ else:
                                 value="35.0% (En Bolívares)",
                                 disabled=True,
                             )
-                            tasa_interes_registro = 20.0  # Registrado contablemente al 20% USD
+                            tasa_interes_registro = 20.0
                         else:
                             tasa_interes_registro = cp1.number_input(
                                 "Interés Sistema (%)",
