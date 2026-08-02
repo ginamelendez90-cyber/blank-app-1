@@ -154,13 +154,25 @@ def calcular_saldo_cuenta(df, cuenta_nombre):
 
 
 # ==========================================
-# BARRA LATERAL (NAVEGACIÓN)
+# BARRA LATERAL (NAVEGACIÓN Y CONFIGURACIÓN)
 # ==========================================
 st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.3")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.4")
+st.sidebar.divider()
+
+# CONFIGURACIÓN DE TASA DE CAMBIO
+st.sidebar.subheader("💱 Tasa de Cambio (Clientes)")
+tasa_bs_usd = st.sidebar.number_input(
+    "Tasa cobrada en Bs / $:",
+    min_value=1.0,
+    value=65.0,  # Coloca aquí la tasa base por defecto que utilizas
+    step=0.5,
+    help="Esta tasa se utiliza para mostrar deudas y abonos en Bolívares al cliente, pero convirtiéndolos internamente a $.",
+)
+
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -249,7 +261,6 @@ if modo_vista == "👤 Portal del Cliente":
 
                 if not resultado.empty:
                     nombre = resultado.iloc[0]["Nombre"]
-                    total_cargos_historico = resultado["Cargo"].sum()
 
                     indices_liq = resultado[
                         resultado["Concepto"].str.contains(
@@ -261,55 +272,64 @@ if modo_vista == "👤 Portal del Cliente":
 
                     if not indices_liq.empty:
                         ult_idx = indices_liq[-1]
-                        mov_actuales = resultado.loc[resultado.index > ult_idx]
-                        mov_historicos = resultado.loc[
-                            resultado.index <= ult_idx
-                        ]
+                        mov_actuales = resultado.loc[resultado.index > ult_idx].copy()
+                        mov_historicos = resultado.loc[resultado.index <= ult_idx].copy()
                     else:
-                        mov_actuales = resultado
+                        mov_actuales = resultado.copy()
                         mov_historicos = pd.DataFrame()
 
-                    prestamo_actual = mov_actuales["Cargo"].sum()
-                    pagos_actual = mov_actuales["Abono"].sum()
-                    saldo_pendiente = prestamo_actual - pagos_actual
+                    # Cálculos internos en USD
+                    prestamo_actual_usd = mov_actuales["Cargo"].sum()
+                    pagos_actual_usd = mov_actuales["Abono"].sum()
+                    saldo_pendiente_usd = prestamo_actual_usd - pagos_actual_usd
+
+                    # Conversión visual a Bolívares para el cliente
+                    prestamo_actual_bs = prestamo_actual_usd * tasa_bs_usd
+                    pagos_actual_bs = pagos_actual_usd * tasa_bs_usd
+                    saldo_pendiente_bs = saldo_pendiente_usd * tasa_bs_usd
 
                     st.subheader(f"Bienvenido/a, **{nombre}**")
 
                     m1, m2, m3 = st.columns(3)
-                    m1.metric(
-                        "📌 Deuda Total Actual", f"${prestamo_actual:,.2f}"
-                    )
-                    m2.metric("💵 Total Abonado", f"${pagos_actual:,.2f}")
+                    m1.metric("📌 Deuda Total Actual", f"Bs. {prestamo_actual_bs:,.2f}")
+                    m2.metric("💵 Total Abonado", f"Bs. {pagos_actual_bs:,.2f}")
                     m3.metric(
                         "⚠️ Saldo Pendiente",
-                        f"${saldo_pendiente:,.2f}",
-                        delta=f"-${saldo_pendiente:,.2f}",
+                        f"Bs. {saldo_pendiente_bs:,.2f}",
+                        delta=f"-Bs. {saldo_pendiente_bs:,.2f}",
                         delta_color="inverse",
                     )
 
-                    st.caption(
-                        f"📊 *Acumulado histórico total: ${total_cargos_historico:,.2f}*"
-                    )
-
                     st.divider()
-                    st.subheader("📋 Historial del Crédito Vigente")
+                    st.subheader("📋 Historial del Crédito Vigente (en Bolívares)")
                     if not mov_actuales.empty:
+                        # Creamos copia para formatear tabla en Bolívares
+                        df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo", "Abono"]].copy()
+                        df_vista_cli["Monto Préstamo (Bs.)"] = df_vista_cli["Cargo"] * tasa_bs_usd
+                        df_vista_cli["Abonado (Bs.)"] = df_vista_cli["Abono"] * tasa_bs_usd
+
                         st.dataframe(
-                            mov_actuales[
-                                ["Fecha", "Concepto", "Cargo", "Abono"]
-                            ],
+                            df_vista_cli[["Fecha", "Concepto", "Monto Préstamo (Bs.)", "Abonado (Bs.)"]],
+                            column_config={
+                                "Monto Préstamo (Bs.)": st.column_config.NumberColumn(format="Bs. %.2f"),
+                                "Abonado (Bs.)": st.column_config.NumberColumn(format="Bs. %.2f"),
+                            },
                             use_container_width=True,
                             hide_index=True,
                         )
 
                     if not mov_historicos.empty:
-                        with st.expander(
-                            "📂 Ver Historial de Créditos Liquidados"
-                        ):
+                        with st.expander("📂 Ver Historial de Créditos Liquidados"):
+                            df_hist_cli = mov_historicos[["Fecha", "Concepto", "Cargo", "Abono"]].copy()
+                            df_hist_cli["Monto Préstamo (Bs.)"] = df_hist_cli["Cargo"] * tasa_bs_usd
+                            df_hist_cli["Abonado (Bs.)"] = df_hist_cli["Abono"] * tasa_bs_usd
+
                             st.dataframe(
-                                mov_historicos[
-                                    ["Fecha", "Concepto", "Cargo", "Abono"]
-                                ],
+                                df_hist_cli[["Fecha", "Concepto", "Monto Préstamo (Bs.)", "Abonado (Bs.)"]],
+                                column_config={
+                                    "Monto Préstamo (Bs.)": st.column_config.NumberColumn(format="Bs. %.2f"),
+                                    "Abonado (Bs.)": st.column_config.NumberColumn(format="Bs. %.2f"),
+                                },
                                 use_container_width=True,
                                 hide_index=True,
                             )
@@ -320,14 +340,10 @@ if modo_vista == "👤 Portal del Cliente":
 
     elif opcion_cliente == "📲 Reportar un Pago":
         st.subheader("📲 Formulario de Reporte de Pago")
-        st.caption(
-            "Registra tu transferencia o pago móvil aquí para notificar al administrador."
-        )
+        st.caption("Registra tu transferencia o pago móvil en Bolívares o Divisa.")
 
         if codigo_url:
-            st.info(
-                f"✨ **Formulario activado para el cliente:** `{codigo_url}`"
-            )
+            st.info(f"✨ **Formulario activado para el cliente:** `{codigo_url}`")
 
         with st.form("form_reportar_pago_cliente", border=True):
             col_p1, col_p2 = st.columns(2)
@@ -346,16 +362,23 @@ if modo_vista == "👤 Portal del Cliente":
 
             col_p3, col_p4 = st.columns(2)
             f_pago = col_p3.date_input("Fecha del Pago", datetime.now())
-            cuenta_destino = col_p4.selectbox(
+            moneda_pago = col_p4.selectbox(
+                "Moneda del Pago:",
+                ["Bolívares (Bs.)", "Dólares ($ / Binance / Efectivo)"],
+            )
+
+            col_p5, col_p6 = st.columns(2)
+            
+            monto_reportado = col_p5.number_input(
+                "Monto Transferido / Pagado:", min_value=0.01, value=100.0, step=10.0
+            )
+
+            cuenta_destino = col_p6.selectbox(
                 "Medio de Pago Utilizado:",
                 ["Pago Móvil", "Efectivo", "Binance"],
             )
 
-            col_p5, col_p6 = st.columns(2)
-            monto_rep = col_p5.number_input(
-                "Monto Transferido ($)", min_value=0.01, value=10.0, step=1.0
-            )
-            num_ref = col_p6.text_input(
+            num_ref = st.text_input(
                 "Número de Referencia / Comprobante:",
                 placeholder="Ej. 849302",
             )
@@ -368,7 +391,7 @@ if modo_vista == "👤 Portal del Cliente":
         codigo_final = codigo_url if codigo_url else cod_cli_rep
 
         if btn_enviar_reporte:
-            if codigo_final and nom_cli_rep and num_ref and monto_rep > 0:
+            if codigo_final and nom_cli_rep and num_ref and monto_reportado > 0:
                 try:
                     sheet_pendientes = obtener_hoja("PAGOS_PENDIENTES")
                     id_pago = f"PAG-{str(uuid.uuid4())[:6].upper()}"
@@ -377,6 +400,14 @@ if modo_vista == "👤 Portal del Cliente":
                     ref_clean = str(num_ref).strip()
                     fecha_str = f_pago.strftime("%Y-%m-%d")
 
+                    # Conversión a dólares si el cliente reporta en Bolívares
+                    if "Bolívares" in moneda_pago:
+                        monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 2)
+                        detalle_referencia = f"{ref_clean} (Bs. {monto_reportado:,.2f} a tasa {tasa_bs_usd})"
+                    else:
+                        monto_usd_convertido = round(monto_reportado, 2)
+                        detalle_referencia = ref_clean
+
                     sheet_pendientes.append_row(
                         [
                             id_pago,
@@ -384,8 +415,8 @@ if modo_vista == "👤 Portal del Cliente":
                             codigo_clean,
                             nombre_clean,
                             cuenta_destino,
-                            ref_clean,
-                            float(monto_rep),
+                            detalle_referencia,
+                            float(monto_usd_convertido), # Se guarda en USD en el backend
                             "PENDIENTE",
                         ]
                     )
@@ -394,6 +425,8 @@ if modo_vista == "👤 Portal del Cliente":
 
                     st.success(
                         f"🎉 **¡Pago registrado en el sistema con éxito!**\n\n"
+                        f"📌 **Monto ingresado:** Bs. {monto_reportado:,.2f} if 'Bolívares' in moneda_pago else f'${monto_reportado:,.2f}'\n"
+                        f"📌 **Equivalente abonado a cuenta ($):** `${monto_usd_convertido:,.2f}`\n"
                         f"📌 **ID de Registro:** `{id_pago}`"
                     )
 
@@ -401,7 +434,8 @@ if modo_vista == "👤 Portal del Cliente":
                         f"👋 *NUEVO PAGO REPORTADO*\n\n"
                         f"📌 *ID:* {id_pago}\n"
                         f"👤 *Cliente:* {nombre_clean} ({codigo_clean})\n"
-                        f"💵 *Monto:* ${monto_rep:,.2f}\n"
+                        f"💵 *Monto:* {f'Bs. {monto_reportado:,.2f}' if 'Bolívares' in moneda_pago else f'${monto_reportado:,.2f}'}\n"
+                        f"💱 *Equivalente en Sistema:* ${monto_usd_convertido:,.2f} USD\n"
                         f"🏦 *Medio:* {cuenta_destino}\n"
                         f"🔢 *Referencia:* {ref_clean}\n"
                         f"📅 *Fecha:* {fecha_str}"
@@ -534,12 +568,12 @@ else:
                                 c1.caption(f"Código: {fila['Codigo']}")
 
                                 c2.markdown(
-                                    f"💵 **Monto:**\n${float(fila['Monto']):,.2f}"
+                                    f"💵 **Monto a Abonar:**\n${float(fila['Monto']):,.2f} USD"
                                 )
                                 c2.caption(f"Vía: {fila['Cuenta']}")
 
                                 c3.markdown(
-                                    f"🔢 **Referencia:**\n`{fila['Referencia']}`"
+                                    f"🔢 **Referencia / Nota:**\n`{fila['Referencia']}`"
                                 )
                                 c3.caption(f"Fecha: {fila['Fecha']}")
 
@@ -865,10 +899,13 @@ else:
                             ]
                         ],
                         column_config={
+                            "Total_Cargos": st.column_config.NumberColumn("Cargos ($)", format="$%.2f"),
+                            "Total_Abonos": st.column_config.NumberColumn("Abonos ($)", format="$%.2f"),
+                            "Saldo_Pendiente": st.column_config.NumberColumn("Saldo ($)", format="$%.2f"),
                             "Enlace_Reporte": st.column_config.LinkColumn(
                                 "Link de Reporte Pago",
                                 display_text="Copiar Link 🔗",
-                            )
+                            ),
                         },
                         use_container_width=True,
                         hide_index=True,
@@ -948,7 +985,7 @@ else:
                             key="c1",
                         )
                         monto_c1 = col_m1.number_input(
-                            f"Monto ({c_1}) ($)",
+                            f"Monto USD ({c_1}) ($)",
                             min_value=0.0,
                             value=0.0,
                             key="mc1",
@@ -962,7 +999,7 @@ else:
                             "Segunda Cuenta", otras_cuentas, key="c2"
                         )
                         monto_c2 = col_m2.number_input(
-                            f"Monto ({c_2}) ($)",
+                            f"Monto USD ({c_2}) ($)",
                             min_value=0.0,
                             value=0.0,
                             key="mc2",
@@ -970,7 +1007,7 @@ else:
                         monto_total_calculado = monto_c1 + monto_c2
                     else:
                         monto = st.number_input(
-                            "Monto ($)", min_value=0.0, value=0.0
+                            "Monto USD ($)", min_value=0.0, value=0.0
                         )
 
                     tasa_interes, monto_interes_calc = 0.0, 0.0
@@ -1014,8 +1051,8 @@ else:
 
                         if monto_base_calc > 0:
                             st.info(
-                                f"💵 **Capital:** ${monto_base_calc:,.2f} | 📈 **Interés:** ${monto_interes_calc:,.2f} | ⚠️ **Total:** ${deuda_total_calc:,.2f}\n\n"
-                                f"👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **${valor_cuota_calc:,.2f}**"
+                                f"💵 **Capital ($):** ${monto_base_calc:,.2f} | 📈 **Interés ($):** ${monto_interes_calc:,.2f} | ⚠️ **Total ($):** ${deuda_total_calc:,.2f}\n\n"
+                                f"👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **${valor_cuota_calc:,.2f} USD** (Bs. {valor_cuota_calc * tasa_bs_usd:,.2f})"
                             )
 
                     concepto_personalizado = st.text_input(
@@ -1274,7 +1311,7 @@ else:
                         "Cuenta:", ["Efectivo", "Pago Móvil", "Binance"]
                     )
                     m_cap = st.number_input(
-                        "Monto ($)", min_value=0.01, value=10.0
+                        "Monto USD ($)", min_value=0.01, value=10.0
                     )
                     d_cap = st.text_input("Nota / Observación")
 
@@ -1316,7 +1353,7 @@ else:
                     cde = st.selectbox(
                         "Destino:", ["Pago Móvil", "Efectivo", "Binance"]
                     )
-                    mtr = st.number_input("Monto ($)", min_value=0.01)
+                    mtr = st.number_input("Monto USD ($)", min_value=0.01)
 
                     if st.form_submit_button(
                         "Transferir", use_container_width=True
@@ -1365,7 +1402,7 @@ else:
                         "Pagado con:", ["Efectivo", "Pago Móvil", "Binance"]
                     )
                     dga = st.text_input("Detalle del Gasto")
-                    mga = st.number_input("Monto ($)", min_value=0.01)
+                    mga = st.number_input("Monto USD ($)", min_value=0.01)
 
                     if st.form_submit_button(
                         "Guardar Gasto", use_container_width=True
