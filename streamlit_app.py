@@ -40,6 +40,31 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 
 # ==========================================
+# VENTANA EMERGENTE (MODAL) DE DETALLE DE GASTOS
+# ==========================================
+@st.dialog("📋 Detalle de Gastos Operativos del Mes")
+def mostrar_detalle_gastos(df_gastos_mes):
+    st.write("A continuación se muestra el desglose de todos los gastos del mes seleccionado:")
+    if not df_gastos_mes.empty:
+        df_det = df_gastos_mes[["Fecha", "Nombre", "Concepto", "Cargo"]].copy()
+        df_det["Fecha"] = pd.to_datetime(df_det["Fecha"]).dt.strftime("%Y-%m-%d")
+        st.dataframe(
+            df_det,
+            column_config={
+                "Fecha": st.column_config.TextColumn("Fecha"),
+                "Nombre": st.column_config.TextColumn("Cuenta Origen"),
+                "Concepto": st.column_config.TextColumn("Detalle / Concepto"),
+                "Cargo": st.column_config.NumberColumn("Monto ($)", format="$%.2f"),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.info(f"💰 **Total en Gastos del Mes:** ${df_gastos_mes['Cargo'].sum():,.2f}")
+    else:
+        st.info("💡 No hay registros de gastos para este mes.")
+
+
+# ==========================================
 # FUNCIONES AUXILIARES DE BASE DE DATOS
 # ==========================================
 def obtener_cliente_gspread():
@@ -135,7 +160,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.2")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.3")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -459,7 +484,6 @@ else:
                 df_existente["Nombre"].astype(str).str.strip()
             )
 
-            # Filtrar clientes reales excluyendo cuentas de sistema, gastos y préstamos externos
             clientes_unicos = (
                 df_existente[
                     ~df_existente["Codigo"].str.contains(
@@ -588,7 +612,7 @@ else:
                 st.error(f"Error al cargar pagos pendientes: {e}")
 
         # ------------------------------------------
-        # 2. FLUJO DE CAJA Y CARTERA (CON PRÉSTAMOS EXTERNOS)
+        # 2. FLUJO DE CAJA Y CARTERA
         # ------------------------------------------
         elif seccion_admin == "📊 Flujo de Caja":
             try:
@@ -630,7 +654,6 @@ else:
                     )
                     cartera_bruta = total_caja + saldo_en_la_calle
 
-                    # Deuda Externa acumulada
                     df_ext = df_existente[df_existente["Codigo"] == "PASIVO_EXT"]
                     deuda_externa_total = float(
                         df_ext["Abono"].sum() - df_ext["Cargo"].sum()
@@ -646,7 +669,6 @@ else:
                         + "&accion=reportar"
                     )
 
-                    # --- MÉTRICAS DE PATRIMONIO ---
                     c_car1, c_car2, c_car3, c_car4 = st.columns(4)
                     c_car1.metric(
                         "💎 Capital Bruto Operativo",
@@ -669,9 +691,6 @@ else:
 
                     st.divider()
 
-                    # ==========================================
-                    # 📅 RESUMEN DIARIO (COBROS Y GASTOS DÍA A DÍA)
-                    # ==========================================
                     st.subheader("📅 Resumen Diario de Flujo de Caja")
                     st.caption(
                         "Registro acumulado día a día de cobros recibidos, gastos operativos y préstamos entregados."
@@ -799,7 +818,6 @@ else:
 
                     st.divider()
 
-                    # Distribución de Cajas y Cartera
                     col_chart, col_cuentas = st.columns([1.2, 1])
                     with col_chart:
                         with st.container(border=True):
@@ -1209,7 +1227,7 @@ else:
 
                 m_ext_tot, m_ext_dev, m_ext_pen = st.columns(3)
                 m_ext_tot.metric("📥 Total Recibido de Terceros", f"${resumen_ext['Total_Prestado'].sum():,.2f}")
-                m_ext_dev.metric("📤 Total Develto a Terceros", f"${resumen_ext['Total_Devuelto'].sum():,.2f}")
+                m_ext_dev.metric("📤 Total Devuelto a Terceros", f"${resumen_ext['Total_Devuelto'].sum():,.2f}")
                 m_ext_pen.metric(
                     "⚠️ Deuda Externa Pendiente",
                     f"${resumen_ext['Saldo_Pendiente_Deuda'].sum():,.2f}",
@@ -1411,7 +1429,7 @@ else:
                             st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 9. CIERRE DE MES
+        # 9. CIERRE DE MES (CON VENTANA EMERGENTE PARA DETALLE DE GASTOS)
         # ------------------------------------------
         elif seccion_admin == "📅 Cierre de Mes":
             st.subheader("📅 Reporte Financiero Mensual")
@@ -1427,9 +1445,10 @@ else:
                     mes_sel = st.selectbox("Seleccionar Mes:", meses)
                     df_mes = df_valido[df_valido["Mes_Año"] == mes_sel]
 
-                    gastos_mes = df_mes[
+                    df_gastos_mes = df_mes[
                         df_mes["Codigo"].str.contains("GASTO_", na=False)
-                    ]["Cargo"].sum()
+                    ]
+                    gastos_mes = df_gastos_mes["Cargo"].sum()
 
                     intereses_mes = df_mes[
                         df_mes["Concepto"].str.contains(
@@ -1449,7 +1468,12 @@ else:
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("💸 Capital Prestado", f"${prestado_mes:,.2f}")
                     m2.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}")
-                    m3.metric("📉 Gastos Operativos", f"${gastos_mes:,.2f}")
+                    
+                    with m3:
+                        st.metric("📉 Gastos Operativos", f"${gastos_mes:,.2f}")
+                        if st.button("🔍 Ver Detalle", key="btn_ver_gastos_modal", use_container_width=True):
+                            mostrar_detalle_gastos(df_gastos_mes)
+
                     m4.metric(
                         "💰 Ganancia Neta",
                         f"${ganancia_neta:,.2f}",
