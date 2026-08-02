@@ -115,7 +115,6 @@ def guardar_configuracion_persistente(nueva_tasa, nuevos_codigos):
     """Guarda permanentemente la tasa y los códigos en Google Sheets."""
     try:
         ws = obtener_hoja("CONFIGURACION")
-        # Actualizar fila de tasa (Fila 2) y fila de códigos (Fila 3)
         ws.update_cell(2, 2, str(nueva_tasa))
         ws.update_cell(3, 2, str(nuevos_codigos))
         st.cache_data.clear()
@@ -182,7 +181,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.7")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.8")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -191,7 +190,6 @@ clave_admin = st.sidebar.text_input(
 )
 es_admin_autenticado = clave_admin == "Kilometro12@"
 
-# SI ES ADMIN: MOSTRAR Y EDITAR CONFIGURACIÓN PERMANENTE
 if es_admin_autenticado:
     st.sidebar.success("🟢 Sesión Activa")
     st.sidebar.divider()
@@ -230,6 +228,7 @@ modo_vista = st.sidebar.radio(
     ["👤 Portal del Cliente", "💼 Panel de Administrador"],
     index=0,
 )
+
 
 # ==========================================
 # VENTANA EMERGENTE (MODAL) DE DETALLE DE GASTOS
@@ -327,7 +326,6 @@ if modo_vista == "👤 Portal del Cliente":
 
                     # EVALUACIÓN DE MONEDA PARA ESTE CLIENTE
                     es_cliente_bs = cod_clean in lista_clientes_bs
-                    factor_conversion = tasa_bs_usd if es_cliente_bs else 1.0
                     moneda_label = "Bs." if es_cliente_bs else "$"
 
                     indices_liq = resultado[
@@ -346,15 +344,32 @@ if modo_vista == "👤 Portal del Cliente":
                         mov_actuales = resultado.copy()
                         mov_historicos = pd.DataFrame()
 
-                    # Cálculos base en USD
-                    prestamo_actual_usd = mov_actuales["Cargo"].sum()
-                    pagos_actual_usd = mov_actuales["Abono"].sum()
-                    saldo_pendiente_usd = prestamo_actual_usd - pagos_actual_usd
+                    # LÓGICA DUAL: Si está en Bs, el interés guardado al 20% en el sistema
+                    # se proyecta al 35% multiplicando por (35/20 = 1.75) en su estado de cuenta.
+                    def calcular_cargo_vista(row):
+                        cargo = float(row["Cargo"])
+                        concepto = str(row["Concepto"]).lower()
+                        if es_cliente_bs:
+                            if "interés aplicado" in concepto or "interes aplicado" in concepto:
+                                return cargo * 1.75 * tasa_bs_usd
+                            return cargo * tasa_bs_usd
+                        return cargo
 
-                    # Conversión adaptativa
-                    prestamo_vis = prestamo_actual_usd * factor_conversion
-                    pagos_vis = pagos_actual_usd * factor_conversion
-                    saldo_vis = saldo_pendiente_usd * factor_conversion
+                    def calcular_abono_vista(row):
+                        abono = float(row["Abono"])
+                        if es_cliente_bs:
+                            return abono * tasa_bs_usd
+                        return abono
+
+                    if not mov_actuales.empty:
+                        mov_actuales["Cargo_Vis"] = mov_actuales.apply(calcular_cargo_vista, axis=1)
+                        mov_actuales["Abono_Vis"] = mov_actuales.apply(calcular_abono_vista, axis=1)
+
+                        prestamo_vis = mov_actuales["Cargo_Vis"].sum()
+                        pagos_vis = mov_actuales["Abono_Vis"].sum()
+                        saldo_vis = prestamo_vis - pagos_vis
+                    else:
+                        prestamo_vis, pagos_vis, saldo_vis = 0.0, 0.0, 0.0
 
                     st.subheader(f"Bienvenido/a, **{nombre}**")
 
@@ -369,34 +384,37 @@ if modo_vista == "👤 Portal del Cliente":
                     )
 
                     st.divider()
-                    st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares' if es_cliente_bs else 'en Dólares'})")
-                    
+                    st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
+
                     if not mov_actuales.empty:
-                        df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo", "Abono"]].copy()
-                        df_vista_cli[f"Monto ({moneda_label})"] = df_vista_cli["Cargo"] * factor_conversion
-                        df_vista_cli[f"Abonado ({moneda_label})"] = df_vista_cli["Abono"] * factor_conversion
+                        df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
 
                         st.dataframe(
-                            df_vista_cli[["Fecha", "Concepto", f"Monto ({moneda_label})", f"Abonado ({moneda_label})"]],
+                            df_vista_cli,
                             column_config={
-                                f"Monto ({moneda_label})": st.column_config.NumberColumn(format=f"{moneda_label} %.2f"),
-                                f"Abonado ({moneda_label})": st.column_config.NumberColumn(format=f"{moneda_label} %.2f"),
+                                "Fecha": st.column_config.TextColumn("Fecha"),
+                                "Concepto": st.column_config.TextColumn("Concepto / Detalle"),
+                                "Cargo_Vis": st.column_config.NumberColumn(f"Monto ({moneda_label})", format=f"{moneda_label} %.2f"),
+                                "Abono_Vis": st.column_config.NumberColumn(f"Abonado ({moneda_label})", format=f"{moneda_label} %.2f"),
                             },
                             use_container_width=True,
                             hide_index=True,
                         )
 
                     if not mov_historicos.empty:
+                        mov_historicos["Cargo_Vis"] = mov_historicos.apply(calcular_cargo_vista, axis=1)
+                        mov_historicos["Abono_Vis"] = mov_historicos.apply(calcular_abono_vista, axis=1)
+
                         with st.expander("📂 Ver Historial de Créditos Liquidados"):
-                            df_hist_cli = mov_historicos[["Fecha", "Concepto", "Cargo", "Abono"]].copy()
-                            df_hist_cli[f"Monto ({moneda_label})"] = df_hist_cli["Cargo"] * factor_conversion
-                            df_hist_cli[f"Abonado ({moneda_label})"] = df_hist_cli["Abono"] * factor_conversion
+                            df_hist_cli = mov_historicos[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
 
                             st.dataframe(
-                                df_hist_cli[["Fecha", "Concepto", f"Monto ({moneda_label})", f"Abonado ({moneda_label})"]],
+                                df_hist_cli,
                                 column_config={
-                                    f"Monto ({moneda_label})": st.column_config.NumberColumn(format=f"{moneda_label} %.2f"),
-                                    f"Abonado ({moneda_label})": st.column_config.NumberColumn(format=f"{moneda_label} %.2f"),
+                                    "Fecha": st.column_config.TextColumn("Fecha"),
+                                    "Concepto": st.column_config.TextColumn("Concepto / Detalle"),
+                                    "Cargo_Vis": st.column_config.NumberColumn(f"Monto ({moneda_label})", format=f"{moneda_label} %.2f"),
+                                    "Abono_Vis": st.column_config.NumberColumn(f"Abonado ({moneda_label})", format=f"{moneda_label} %.2f"),
                                 },
                                 use_container_width=True,
                                 hide_index=True,
@@ -436,7 +454,7 @@ if modo_vista == "👤 Portal del Cliente":
             )
 
             col_p5, col_p6 = st.columns(2)
-            
+
             monto_reportado = col_p5.number_input(
                 "Monto Transferido / Pagado:", min_value=0.01, value=100.0, step=10.0
             )
@@ -469,6 +487,7 @@ if modo_vista == "👤 Portal del Cliente":
 
                     es_cliente_bs = codigo_final in lista_clientes_bs
 
+                    # Conversión a dólares usando la tasa registrada para el flujo de caja interno
                     if es_cliente_bs and "Bolívares" in moneda_pago:
                         monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 2)
                         detalle_referencia = f"{ref_clean} (Bs. {monto_reportado:,.2f} a tasa {tasa_bs_usd})"
@@ -494,7 +513,7 @@ if modo_vista == "👤 Portal del Cliente":
                     st.success(
                         f"🎉 **¡Pago registrado en el sistema con éxito!**\n\n"
                         f"📌 **Monto ingresado:** {'Bs. ' + f'{monto_reportado:,.2f}' if ('Bolívares' in moneda_pago) else '$' + f'{monto_reportado:,.2f}'}\n"
-                        f"📌 **Abono a abonar en sistema ($):** `${monto_usd_convertido:,.2f} USD`\n"
+                        f"📌 **Abono equivalente en Flujo de Caja ($):** `${monto_usd_convertido:,.2f} USD`\n"
                         f"📌 **ID de Registro:** `{id_pago}`"
                     )
 
@@ -1088,8 +1107,9 @@ else:
                     if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
                         st.markdown("---")
                         cp1, cp2, cp3 = st.columns(3)
+                        # Interés del sistema se registra por defecto al 20%
                         tasa_interes = cp1.number_input(
-                            "Interés (%)", min_value=0.0, value=15.0, step=1.0
+                            "Interés Sistema (%)", min_value=0.0, value=20.0, step=1.0
                         )
                         frecuencia_pago = cp2.selectbox(
                             "Frecuencia",
@@ -1119,8 +1139,8 @@ else:
 
                         if monto_base_calc > 0:
                             st.info(
-                                f"💵 **Capital ($):** ${monto_base_calc:,.2f} | 📈 **Interés ($):** ${monto_interes_calc:,.2f} | ⚠️ **Total ($):** ${deuda_total_calc:,.2f}\n\n"
-                                f"👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **${valor_cuota_calc:,.2f} USD** (Bs. {valor_cuota_calc * tasa_bs_usd:,.2f})"
+                                f"💵 **Capital ($):** ${monto_base_calc:,.2f} | 📈 **Interés Sistema ({tasa_interes}%):** ${monto_interes_calc:,.2f} | ⚠️ **Total ($):** ${deuda_total_calc:,.2f}\n\n"
+                                f"👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **${valor_cuota_calc:,.2f} USD**"
                             )
 
                     concepto_personalizado = st.text_input(
@@ -1259,7 +1279,7 @@ else:
                                     desc = f"Préstamo externo recibido de {nom_pe.strip()} ({cta_pe})"
                                     if obs_pe:
                                         desc += f" - {obs_pe.strip()}"
-                                    
+
                                     sheet.append_row([
                                         f_pe.strftime("%Y-%m-%d"),
                                         "PASIVO_EXT",
@@ -1279,13 +1299,13 @@ else:
             with col_ext2:
                 with st.container(border=True):
                     st.markdown("### 📤 Devolver / Pagar Préstamo (-)")
-                    
+
                     df_ext_prestamistas = df_existente[df_existente["Codigo"] == "PASIVO_EXT"]
                     prestamistas_lista = df_ext_prestamistas["Nombre"].unique().tolist() if not df_ext_prestamistas.empty else []
 
                     with st.form("form_pagar_prestamo_ext"):
                         f_dev = st.date_input("Fecha de Devolución", datetime.now(), key="f_dev")
-                        
+
                         if prestamistas_lista:
                             nom_dev = st.selectbox("Seleccionar Prestamista:", prestamistas_lista)
                         else:
