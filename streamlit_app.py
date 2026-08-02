@@ -154,24 +154,36 @@ def calcular_saldo_cuenta(df, cuenta_nombre):
 
 
 # ==========================================
-# BARRA LATERAL (NAVEGACIÓN Y CONFIGURACIÓN)
+# BARRA LATERAL (CONFIGURACIÓN DE MONEDAS)
 # ==========================================
 st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.4")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.5")
 st.sidebar.divider()
 
-# CONFIGURACIÓN DE TASA DE CAMBIO
-st.sidebar.subheader("💱 Tasa de Cambio (Clientes)")
+# CONFIGURACIÓN DE CLIENTES EN BOLÍVARES
+st.sidebar.subheader("💱 Clientes en Bolívares (Bs)")
+
 tasa_bs_usd = st.sidebar.number_input(
     "Tasa cobrada en Bs / $:",
     min_value=1.0,
-    value=65.0,  # Coloca aquí la tasa base por defecto que utilizas
+    value=65.0,
     step=0.5,
-    help="Esta tasa se utiliza para mostrar deudas y abonos en Bolívares al cliente, pero convirtiéndolos internamente a $.",
+    help="Tasa especial que se aplicará únicamente a los clientes configurados abajo.",
 )
+
+codigos_bs_input = st.sidebar.text_input(
+    "Códigos en Bs (separados por coma):",
+    value="CLI-001, CLI-002",
+    help="Ingresa los códigos de los clientes que verán su cuenta en Bs. Los demás verán en $.",
+)
+
+# Convertir la lista ingresada a códigos limpios en mayúsculas
+lista_clientes_bs = [
+    c.strip().upper() for c in codigos_bs_input.split(",") if c.strip()
+]
 
 st.sidebar.divider()
 
@@ -245,6 +257,7 @@ if modo_vista == "👤 Portal del Cliente":
 
         if hacer_busqueda and codigo_cliente:
             try:
+                cod_clean = str(codigo_cliente).strip().upper()
                 df = conn.read(
                     ttl=0,
                     usecols=[
@@ -256,11 +269,16 @@ if modo_vista == "👤 Portal del Cliente":
                         "Abono",
                     ],
                 )
-                df["Codigo"] = df["Codigo"].astype(str).str.strip()
-                resultado = df[df["Codigo"] == str(codigo_cliente).strip()]
+                df["Codigo"] = df["Codigo"].astype(str).str.strip().str.upper()
+                resultado = df[df["Codigo"] == cod_clean]
 
                 if not resultado.empty:
                     nombre = resultado.iloc[0]["Nombre"]
+
+                    # EVALUACIÓN DE MONEDA PARA ESTE CLIENTE
+                    es_cliente_bs = cod_clean in lista_clientes_bs
+                    factor_conversion = tasa_bs_usd if es_cliente_bs else 1.0
+                    moneda_label = "Bs." if es_cliente_bs else "$"
 
                     indices_liq = resultado[
                         resultado["Concepto"].str.contains(
@@ -278,41 +296,41 @@ if modo_vista == "👤 Portal del Cliente":
                         mov_actuales = resultado.copy()
                         mov_historicos = pd.DataFrame()
 
-                    # Cálculos internos en USD
+                    # Cálculos base en USD
                     prestamo_actual_usd = mov_actuales["Cargo"].sum()
                     pagos_actual_usd = mov_actuales["Abono"].sum()
                     saldo_pendiente_usd = prestamo_actual_usd - pagos_actual_usd
 
-                    # Conversión visual a Bolívares para el cliente
-                    prestamo_actual_bs = prestamo_actual_usd * tasa_bs_usd
-                    pagos_actual_bs = pagos_actual_usd * tasa_bs_usd
-                    saldo_pendiente_bs = saldo_pendiente_usd * tasa_bs_usd
+                    # Conversión adaptativa (si es cliente en Bs se multiplica, si es en $ queda igual)
+                    prestamo_vis = prestamo_actual_usd * factor_conversion
+                    pagos_vis = pagos_actual_usd * factor_conversion
+                    saldo_vis = saldo_pendiente_usd * factor_conversion
 
                     st.subheader(f"Bienvenido/a, **{nombre}**")
 
                     m1, m2, m3 = st.columns(3)
-                    m1.metric("📌 Deuda Total Actual", f"Bs. {prestamo_actual_bs:,.2f}")
-                    m2.metric("💵 Total Abonado", f"Bs. {pagos_actual_bs:,.2f}")
+                    m1.metric("📌 Deuda Total Actual", f"{moneda_label} {prestamo_vis:,.2f}")
+                    m2.metric("💵 Total Abonado", f"{moneda_label} {pagos_vis:,.2f}")
                     m3.metric(
                         "⚠️ Saldo Pendiente",
-                        f"Bs. {saldo_pendiente_bs:,.2f}",
-                        delta=f"-Bs. {saldo_pendiente_bs:,.2f}",
+                        f"{moneda_label} {saldo_vis:,.2f}",
+                        delta=f"-{moneda_label} {saldo_vis:,.2f}",
                         delta_color="inverse",
                     )
 
                     st.divider()
-                    st.subheader("📋 Historial del Crédito Vigente (en Bolívares)")
+                    st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares' if es_cliente_bs else 'en Dólares'})")
+                    
                     if not mov_actuales.empty:
-                        # Creamos copia para formatear tabla en Bolívares
                         df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo", "Abono"]].copy()
-                        df_vista_cli["Monto Préstamo (Bs.)"] = df_vista_cli["Cargo"] * tasa_bs_usd
-                        df_vista_cli["Abonado (Bs.)"] = df_vista_cli["Abono"] * tasa_bs_usd
+                        df_vista_cli[f"Monto ({moneda_label})"] = df_vista_cli["Cargo"] * factor_conversion
+                        df_vista_cli[f"Abonado ({moneda_label})"] = df_vista_cli["Abono"] * factor_conversion
 
                         st.dataframe(
-                            df_vista_cli[["Fecha", "Concepto", "Monto Préstamo (Bs.)", "Abonado (Bs.)"]],
+                            df_vista_cli[["Fecha", "Concepto", f"Monto ({moneda_label})", f"Abonado ({moneda_label})"]],
                             column_config={
-                                "Monto Préstamo (Bs.)": st.column_config.NumberColumn(format="Bs. %.2f"),
-                                "Abonado (Bs.)": st.column_config.NumberColumn(format="Bs. %.2f"),
+                                f"Monto ({moneda_label})": st.column_config.NumberColumn(format=f"{moneda_label} %.2f"),
+                                f"Abonado ({moneda_label})": st.column_config.NumberColumn(format=f"{moneda_label} %.2f"),
                             },
                             use_container_width=True,
                             hide_index=True,
@@ -321,14 +339,14 @@ if modo_vista == "👤 Portal del Cliente":
                     if not mov_historicos.empty:
                         with st.expander("📂 Ver Historial de Créditos Liquidados"):
                             df_hist_cli = mov_historicos[["Fecha", "Concepto", "Cargo", "Abono"]].copy()
-                            df_hist_cli["Monto Préstamo (Bs.)"] = df_hist_cli["Cargo"] * tasa_bs_usd
-                            df_hist_cli["Abonado (Bs.)"] = df_hist_cli["Abono"] * tasa_bs_usd
+                            df_hist_cli[f"Monto ({moneda_label})"] = df_hist_cli["Cargo"] * factor_conversion
+                            df_hist_cli[f"Abonado ({moneda_label})"] = df_hist_cli["Abono"] * factor_conversion
 
                             st.dataframe(
-                                df_hist_cli[["Fecha", "Concepto", "Monto Préstamo (Bs.)", "Abonado (Bs.)"]],
+                                df_hist_cli[["Fecha", "Concepto", f"Monto ({moneda_label})", f"Abonado ({moneda_label})"]],
                                 column_config={
-                                    "Monto Préstamo (Bs.)": st.column_config.NumberColumn(format="Bs. %.2f"),
-                                    "Abonado (Bs.)": st.column_config.NumberColumn(format="Bs. %.2f"),
+                                    f"Monto ({moneda_label})": st.column_config.NumberColumn(format=f"{moneda_label} %.2f"),
+                                    f"Abonado ({moneda_label})": st.column_config.NumberColumn(format=f"{moneda_label} %.2f"),
                                 },
                                 use_container_width=True,
                                 hide_index=True,
@@ -340,7 +358,7 @@ if modo_vista == "👤 Portal del Cliente":
 
     elif opcion_cliente == "📲 Reportar un Pago":
         st.subheader("📲 Formulario de Reporte de Pago")
-        st.caption("Registra tu transferencia o pago móvil en Bolívares o Divisa.")
+        st.caption("Registra tu transferencia o pago móvil.")
 
         if codigo_url:
             st.info(f"✨ **Formulario activado para el cliente:** `{codigo_url}`")
@@ -388,20 +406,23 @@ if modo_vista == "👤 Portal del Cliente":
                 use_container_width=True,
             )
 
-        codigo_final = codigo_url if codigo_url else cod_cli_rep
+        codigo_final = str(codigo_url if codigo_url else cod_cli_rep).strip().upper()
 
         if btn_enviar_reporte:
             if codigo_final and nom_cli_rep and num_ref and monto_reportado > 0:
                 try:
                     sheet_pendientes = obtener_hoja("PAGOS_PENDIENTES")
                     id_pago = f"PAG-{str(uuid.uuid4())[:6].upper()}"
-                    codigo_clean = str(codigo_final).strip().upper()
                     nombre_clean = nom_cli_rep.strip()
                     ref_clean = str(num_ref).strip()
                     fecha_str = f_pago.strftime("%Y-%m-%d")
 
-                    # Conversión a dólares si el cliente reporta en Bolívares
-                    if "Bolívares" in moneda_pago:
+                    es_cliente_bs = codigo_final in lista_clientes_bs
+
+                    # Lógica de Conversión al reportar:
+                    # Si el cliente es de la lista en Bs Y paga en Bolívares -> Se divide entre la tasa.
+                    # Si no, se toma tal cual como Dólares.
+                    if es_cliente_bs and "Bolívares" in moneda_pago:
                         monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 2)
                         detalle_referencia = f"{ref_clean} (Bs. {monto_reportado:,.2f} a tasa {tasa_bs_usd})"
                     else:
@@ -412,11 +433,11 @@ if modo_vista == "👤 Portal del Cliente":
                         [
                             id_pago,
                             fecha_str,
-                            codigo_clean,
+                            codigo_final,
                             nombre_clean,
                             cuenta_destino,
                             detalle_referencia,
-                            float(monto_usd_convertido), # Se guarda en USD en el backend
+                            float(monto_usd_convertido),  # Se guarda en USD
                             "PENDIENTE",
                         ]
                     )
@@ -425,16 +446,16 @@ if modo_vista == "👤 Portal del Cliente":
 
                     st.success(
                         f"🎉 **¡Pago registrado en el sistema con éxito!**\n\n"
-                        f"📌 **Monto ingresado:** Bs. {monto_reportado:,.2f} if 'Bolívares' in moneda_pago else f'${monto_reportado:,.2f}'\n"
-                        f"📌 **Equivalente abonado a cuenta ($):** `${monto_usd_convertido:,.2f}`\n"
+                        f"📌 **Monto ingresado:** {'Bs. ' + f'{monto_reportado:,.2f}' if ('Bolívares' in moneda_pago) else '$' + f'{monto_reportado:,.2f}'}\n"
+                        f"📌 **Abono a abonar en sistema ($):** `${monto_usd_convertido:,.2f} USD`\n"
                         f"📌 **ID de Registro:** `{id_pago}`"
                     )
 
                     mensaje_wa = (
                         f"👋 *NUEVO PAGO REPORTADO*\n\n"
                         f"📌 *ID:* {id_pago}\n"
-                        f"👤 *Cliente:* {nombre_clean} ({codigo_clean})\n"
-                        f"💵 *Monto:* {f'Bs. {monto_reportado:,.2f}' if 'Bolívares' in moneda_pago else f'${monto_reportado:,.2f}'}\n"
+                        f"👤 *Cliente:* {nombre_clean} ({codigo_final})\n"
+                        f"💵 *Monto:* {'Bs. ' + f'{monto_reportado:,.2f}' if ('Bolívares' in moneda_pago) else '$' + f'{monto_reportado:,.2f}'}\n"
                         f"💱 *Equivalente en Sistema:* ${monto_usd_convertido:,.2f} USD\n"
                         f"🏦 *Medio:* {cuenta_destino}\n"
                         f"🔢 *Referencia:* {ref_clean}\n"
