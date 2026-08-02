@@ -10,7 +10,7 @@ from streamlit_gsheets import GSheetsConnection
 # ==========================================
 # CONFIGURACIÓN GENERAL
 # ==========================================
-TELEFONO_ADMIN = "584123801615"  # Tu número de contacto sin '+'
+TELEFONO_ADMIN = "584123801615"
 
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
@@ -38,37 +38,6 @@ st.markdown(
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Inicializar variables de configuración de Bolívares en Session State
-if "tasa_bs_usd" not in st.session_state:
-    st.session_state.tasa_bs_usd = 65.0
-if "codigos_bs_input" not in st.session_state:
-    st.session_state.codigos_bs_input = "CLI-001, CLI-002"
-
-
-# ==========================================
-# VENTANA EMERGENTE (MODAL) DE DETALLE DE GASTOS
-# ==========================================
-@st.dialog("📋 Detalle de Gastos Operativos del Mes")
-def mostrar_detalle_gastos(df_gastos_mes):
-    st.write("A continuación se muestra el desglose de todos los gastos del mes seleccionado:")
-    if not df_gastos_mes.empty:
-        df_det = df_gastos_mes[["Fecha", "Nombre", "Concepto", "Cargo"]].copy()
-        df_det["Fecha"] = pd.to_datetime(df_det["Fecha"]).dt.strftime("%Y-%m-%d")
-        st.dataframe(
-            df_det,
-            column_config={
-                "Fecha": st.column_config.TextColumn("Fecha"),
-                "Nombre": st.column_config.TextColumn("Cuenta Origen"),
-                "Concepto": st.column_config.TextColumn("Detalle / Concepto"),
-                "Cargo": st.column_config.NumberColumn("Monto ($)", format="$%.2f"),
-            },
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.info(f"💰 **Total en Gastos del Mes:** ${df_gastos_mes['Cargo'].sum():,.2f}")
-    else:
-        st.info("💡 No hay registros de gastos para este mes.")
-
 
 # ==========================================
 # FUNCIONES AUXILIARES DE BASE DE DATOS
@@ -87,6 +56,16 @@ def obtener_hoja(nombre_hoja="Sheet1"):
     client = obtener_cliente_gspread()
     url = st.secrets["connections"]["gsheets"]["spreadsheet"]
     sh = client.open_by_url(url)
+
+    if nombre_hoja == "CONFIGURACION":
+        try:
+            return sh.worksheet("CONFIGURACION")
+        except Exception:
+            ws = sh.add_worksheet(title="CONFIGURACION", rows="10", cols="2")
+            ws.append_row(["Parametro", "Valor"])
+            ws.append_row(["tasa_bs_usd", "65.0"])
+            ws.append_row(["codigos_bs", "CLI-001, CLI-002"])
+            return ws
 
     if nombre_hoja == "PAGOS_PENDIENTES":
         try:
@@ -116,6 +95,34 @@ def obtener_hoja(nombre_hoja="Sheet1"):
             return sh.worksheet("Hoja 1")
         except Exception:
             return sh.get_worksheet(0)
+
+
+def cargar_configuracion_persistente():
+    """Lee la tasa y los códigos guardados en la hoja CONFIGURACION."""
+    try:
+        ws = obtener_hoja("CONFIGURACION")
+        records = ws.get_all_records()
+        config_dict = {r["Parametro"]: str(r["Valor"]) for r in records}
+
+        tasa = float(config_dict.get("tasa_bs_usd", 65.0))
+        codigos = config_dict.get("codigos_bs", "CLI-001, CLI-002")
+        return tasa, codigos
+    except Exception:
+        return 65.0, "CLI-001, CLI-002"
+
+
+def guardar_configuracion_persistente(nueva_tasa, nuevos_codigos):
+    """Guarda permanentemente la tasa y los códigos en Google Sheets."""
+    try:
+        ws = obtener_hoja("CONFIGURACION")
+        # Actualizar fila de tasa (Fila 2) y fila de códigos (Fila 3)
+        ws.update_cell(2, 2, str(nueva_tasa))
+        ws.update_cell(3, 2, str(nuevos_codigos))
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar configuración: {e}")
+        return False
 
 
 def calcular_saldo_cuenta(df, cuenta_nombre):
@@ -160,13 +167,22 @@ def calcular_saldo_cuenta(df, cuenta_nombre):
 
 
 # ==========================================
+# CARGAR CONFIGURACIÓN DESDE GOOGLE SHEETS
+# ==========================================
+tasa_bs_usd, codigos_bs_str = cargar_configuracion_persistente()
+lista_clientes_bs = [
+    c.strip().upper() for c in codigos_bs_str.split(",") if c.strip()
+]
+
+
+# ==========================================
 # BARRA LATERAL (AUTENTICACIÓN Y NAVEGACIÓN)
 # ==========================================
 st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.6")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.7")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -175,33 +191,37 @@ clave_admin = st.sidebar.text_input(
 )
 es_admin_autenticado = clave_admin == "Kilometro12@"
 
-# SI ES ADMIN: MOSTRAR MÓDULO PRIVADO DE CONFIGURACIÓN DE TASA Y CÓDIGOS BS
+# SI ES ADMIN: MOSTRAR Y EDITAR CONFIGURACIÓN PERMANENTE
 if es_admin_autenticado:
     st.sidebar.success("🟢 Sesión Activa")
     st.sidebar.divider()
-    
-    st.sidebar.subheader("💱 Configuración Bs (Solo Admin)")
-    st.session_state.tasa_bs_usd = st.sidebar.number_input(
-        "Tasa cobrada en Bs / $:",
-        min_value=1.0,
-        value=float(st.session_state.tasa_bs_usd),
-        step=0.5,
-        help="Tasa especial aplicable únicamente a los clientes configurados abajo.",
-    )
 
-    st.session_state.codigos_bs_input = st.sidebar.text_input(
-        "Códigos en Bs (separados por coma):",
-        value=st.session_state.codigos_bs_input,
-        help="Ingresa los códigos de clientes que verán su cuenta en Bs. Los demás verán en $.",
-    )
+    st.sidebar.subheader("💱 Configuración Bs (Solo Admin)")
+
+    with st.sidebar.form("form_config_bs_admin"):
+        nueva_tasa = st.number_input(
+            "Tasa cobrada en Bs / $:",
+            min_value=1.0,
+            value=float(tasa_bs_usd),
+            step=0.5,
+        )
+
+        nuevos_codigos = st.text_input(
+            "Códigos en Bs (separados por coma):",
+            value=codigos_bs_str,
+        )
+
+        btn_guardar_config = st.form_submit_button(
+            "💾 Guardar Cambios Permanentes", use_container_width=True
+        )
+
+        if btn_guardar_config:
+            if guardar_configuracion_persistente(nueva_tasa, nuevos_codigos):
+                st.sidebar.success("✅ ¡Configuración guardada!")
+                st.rerun()
+
 elif clave_admin != "":
     st.sidebar.error("🔴 Clave incorrecta")
-
-# Asignación global de variables de tasa desde Session State
-tasa_bs_usd = st.session_state.tasa_bs_usd
-lista_clientes_bs = [
-    c.strip().upper() for c in st.session_state.codigos_bs_input.split(",") if c.strip()
-]
 
 st.sidebar.divider()
 
@@ -210,6 +230,31 @@ modo_vista = st.sidebar.radio(
     ["👤 Portal del Cliente", "💼 Panel de Administrador"],
     index=0,
 )
+
+# ==========================================
+# VENTANA EMERGENTE (MODAL) DE DETALLE DE GASTOS
+# ==========================================
+@st.dialog("📋 Detalle de Gastos Operativos del Mes")
+def mostrar_detalle_gastos(df_gastos_mes):
+    st.write("A continuación se muestra el desglose de todos los gastos del mes seleccionado:")
+    if not df_gastos_mes.empty:
+        df_det = df_gastos_mes[["Fecha", "Nombre", "Concepto", "Cargo"]].copy()
+        df_det["Fecha"] = pd.to_datetime(df_det["Fecha"]).dt.strftime("%Y-%m-%d")
+        st.dataframe(
+            df_det,
+            column_config={
+                "Fecha": st.column_config.TextColumn("Fecha"),
+                "Nombre": st.column_config.TextColumn("Cuenta Origen"),
+                "Concepto": st.column_config.TextColumn("Detalle / Concepto"),
+                "Cargo": st.column_config.NumberColumn("Monto ($)", format="$%.2f"),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.info(f"💰 **Total en Gastos del Mes:** ${df_gastos_mes['Cargo'].sum():,.2f}")
+    else:
+        st.info("💡 No hay registros de gastos para este mes.")
+
 
 # ==========================================
 # PESTAÑA 1: PORTAL DEL CLIENTE
@@ -1528,7 +1573,7 @@ else:
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("💸 Capital Prestado", f"${prestado_mes:,.2f}")
                     m2.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}")
-                    
+
                     with m3:
                         st.metric("📉 Gastos Operativos", f"${gastos_mes:,.2f}")
                         if st.button("🔍 Ver Detalle", key="btn_ver_gastos_modal", use_container_width=True):
