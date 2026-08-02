@@ -48,6 +48,16 @@ def calcular_dias_cobro_acumulados(fecha_inicio, fecha_fin):
         cur += timedelta(days=1)
     return dias_validos
 
+def obtener_tasa_concepto(concepto_str, tasa_defecto):
+    """Extrae la tasa fija registrada en la descripción del concepto si existe."""
+    match = re.search(r'tasa:\s*([\d\.]+)', str(concepto_str), re.IGNORECASE)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            pass
+    return tasa_defecto
+
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
     page_icon="💳",
@@ -392,11 +402,13 @@ if modo_vista == "👤 Portal del Cliente":
 
                     def calcular_cargo_vista(row):
                         cargo = float(row["Cargo"])
-                        concepto = str(row["Concepto"]).lower()
+                        concepto = str(row["Concepto"])
+                        concepto_lower = concepto.lower()
                         if es_cliente_bs:
-                            if "interés aplicado" in concepto or "interes aplicado" in concepto:
-                                return cargo * 1.75 * tasa_bs_usd
-                            return cargo * tasa_bs_usd
+                            tasa_fija = obtener_tasa_concepto(concepto, tasa_bs_usd)
+                            if "interés aplicado" in concepto_lower or "interes aplicado" in concepto_lower:
+                                return cargo * 1.75 * tasa_fija
+                            return cargo * tasa_fija
                         return cargo
 
                     def calcular_abono_vista(row):
@@ -887,11 +899,13 @@ else:
 
                         def calc_cargo(row):
                             cargo = float(row["Cargo"])
-                            c_str = str(row["Concepto"]).lower()
+                            c_str = str(row["Concepto"])
+                            c_lower = c_str.lower()
                             if es_cliente_bs:
-                                if "interés aplicado" in c_str or "interes aplicado" in c_str:
-                                    return cargo * 1.75 * tasa_bs_usd
-                                return cargo * tasa_bs_usd
+                                tasa_fija = obtener_tasa_concepto(c_str, tasa_bs_usd)
+                                if "interés aplicado" in c_lower or "interes aplicado" in c_lower:
+                                    return cargo * 1.75 * tasa_fija
+                                return cargo * tasa_fija
                             return cargo
 
                         def calc_abono(row):
@@ -1499,6 +1513,8 @@ else:
                                 if concepto_personalizado:
                                     desc_base += f" - {concepto_personalizado}"
 
+                                tag_tasa = f" (Tasa: {tasa_bs_usd})" if es_bs else ""
+
                                 if usar_dos_cuentas:
                                     if monto_usd_final <= 0:
                                         st.error(
@@ -1510,6 +1526,9 @@ else:
                                         == "Registrar Abono / Pago Directo"
                                     )
                                     if m1_usd > 0:
+                                        desc_m1 = f"{desc_base} ({c_1 if is_abono else 'Salida de ' + c_1})"
+                                        if not is_abono:
+                                            desc_m1 += tag_tasa
                                         filas_a_agregar.append(
                                             [
                                                 nueva_fecha.strftime(
@@ -1517,12 +1536,15 @@ else:
                                                 ),
                                                 str(nuevo_codigo).strip(),
                                                 nuevo_nombre,
-                                                f"{desc_base} ({c_1 if is_abono else 'Salida de ' + c_1})",
+                                                desc_m1,
                                                 0.0 if is_abono else float(m1_usd),
                                                 float(m1_usd) if is_abono else 0.0,
                                             ]
                                         )
                                     if m2_usd > 0:
+                                        desc_m2 = f"{desc_base} ({c_2 if is_abono else 'Salida de ' + c_2})"
+                                        if not is_abono:
+                                            desc_m2 += tag_tasa
                                         filas_a_agregar.append(
                                             [
                                                 nueva_fecha.strftime(
@@ -1530,7 +1552,7 @@ else:
                                                 ),
                                                 str(nuevo_codigo).strip(),
                                                 nuevo_nombre,
-                                                f"{desc_base} ({c_2 if is_abono else 'Salida de ' + c_2})",
+                                                desc_m2,
                                                 0.0 if is_abono else float(m2_usd),
                                                 float(m2_usd) if is_abono else 0.0,
                                             ]
@@ -1545,12 +1567,15 @@ else:
                                         tipo_movimiento
                                         == "Registrar Abono / Pago Directo"
                                     )
+                                    desc_fin = f"{desc_base} ({cuenta_afectada if is_abono else 'Salida de ' + cuenta_afectada})"
+                                    if not is_abono:
+                                        desc_fin += tag_tasa
                                     filas_a_agregar.append(
                                         [
                                             nueva_fecha.strftime("%Y-%m-%d"),
                                             str(nuevo_codigo).strip(),
                                             nuevo_nombre,
-                                            f"{desc_base} ({cuenta_afectada if is_abono else 'Salida de ' + cuenta_afectada})",
+                                            desc_fin,
                                             0.0 if is_abono else float(monto_usd_final),
                                             float(monto_usd_final) if is_abono else 0.0,
                                         ]
@@ -1561,12 +1586,13 @@ else:
                                     == "Registrar Préstamo / Deuda Inicial"
                                     and monto_interes_usd_calc > 0
                                 ):
+                                    desc_int = f"Interés aplicado ({'35% Bs.' if es_bs else str(tasa_interes_registro) + '%'}){tag_tasa}"
                                     filas_a_agregar.append(
                                         [
                                             nueva_fecha.strftime("%Y-%m-%d"),
                                             str(nuevo_codigo).strip(),
                                             nuevo_nombre,
-                                            f"Interés aplicado ({'35% Bs.' if es_bs else str(tasa_interes_registro) + '%'})",
+                                            desc_int,
                                             float(monto_interes_usd_calc),
                                             0.0,
                                         ]
