@@ -38,6 +38,12 @@ st.markdown(
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# Inicializar variables de configuración de Bolívares en Session State
+if "tasa_bs_usd" not in st.session_state:
+    st.session_state.tasa_bs_usd = 65.0
+if "codigos_bs_input" not in st.session_state:
+    st.session_state.codigos_bs_input = "CLI-001, CLI-002"
+
 
 # ==========================================
 # VENTANA EMERGENTE (MODAL) DE DETALLE DE GASTOS
@@ -154,37 +160,13 @@ def calcular_saldo_cuenta(df, cuenta_nombre):
 
 
 # ==========================================
-# BARRA LATERAL (CONFIGURACIÓN DE MONEDAS)
+# BARRA LATERAL (AUTENTICACIÓN Y NAVEGACIÓN)
 # ==========================================
 st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.5")
-st.sidebar.divider()
-
-# CONFIGURACIÓN DE CLIENTES EN BOLÍVARES
-st.sidebar.subheader("💱 Clientes en Bolívares (Bs)")
-
-tasa_bs_usd = st.sidebar.number_input(
-    "Tasa cobrada en Bs / $:",
-    min_value=1.0,
-    value=65.0,
-    step=0.5,
-    help="Tasa especial que se aplicará únicamente a los clientes configurados abajo.",
-)
-
-codigos_bs_input = st.sidebar.text_input(
-    "Códigos en Bs (separados por coma):",
-    value="CLI-001, CLI-002",
-    help="Ingresa los códigos de los clientes que verán su cuenta en Bs. Los demás verán en $.",
-)
-
-# Convertir la lista ingresada a códigos limpios en mayúsculas
-lista_clientes_bs = [
-    c.strip().upper() for c in codigos_bs_input.split(",") if c.strip()
-]
-
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.6")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -193,10 +175,33 @@ clave_admin = st.sidebar.text_input(
 )
 es_admin_autenticado = clave_admin == "Kilometro12@"
 
+# SI ES ADMIN: MOSTRAR MÓDULO PRIVADO DE CONFIGURACIÓN DE TASA Y CÓDIGOS BS
 if es_admin_autenticado:
     st.sidebar.success("🟢 Sesión Activa")
+    st.sidebar.divider()
+    
+    st.sidebar.subheader("💱 Configuración Bs (Solo Admin)")
+    st.session_state.tasa_bs_usd = st.sidebar.number_input(
+        "Tasa cobrada en Bs / $:",
+        min_value=1.0,
+        value=float(st.session_state.tasa_bs_usd),
+        step=0.5,
+        help="Tasa especial aplicable únicamente a los clientes configurados abajo.",
+    )
+
+    st.session_state.codigos_bs_input = st.sidebar.text_input(
+        "Códigos en Bs (separados por coma):",
+        value=st.session_state.codigos_bs_input,
+        help="Ingresa los códigos de clientes que verán su cuenta en Bs. Los demás verán en $.",
+    )
 elif clave_admin != "":
     st.sidebar.error("🔴 Clave incorrecta")
+
+# Asignación global de variables de tasa desde Session State
+tasa_bs_usd = st.session_state.tasa_bs_usd
+lista_clientes_bs = [
+    c.strip().upper() for c in st.session_state.codigos_bs_input.split(",") if c.strip()
+]
 
 st.sidebar.divider()
 
@@ -301,7 +306,7 @@ if modo_vista == "👤 Portal del Cliente":
                     pagos_actual_usd = mov_actuales["Abono"].sum()
                     saldo_pendiente_usd = prestamo_actual_usd - pagos_actual_usd
 
-                    # Conversión adaptativa (si es cliente en Bs se multiplica, si es en $ queda igual)
+                    # Conversión adaptativa
                     prestamo_vis = prestamo_actual_usd * factor_conversion
                     pagos_vis = pagos_actual_usd * factor_conversion
                     saldo_vis = saldo_pendiente_usd * factor_conversion
@@ -419,9 +424,6 @@ if modo_vista == "👤 Portal del Cliente":
 
                     es_cliente_bs = codigo_final in lista_clientes_bs
 
-                    # Lógica de Conversión al reportar:
-                    # Si el cliente es de la lista en Bs Y paga en Bolívares -> Se divide entre la tasa.
-                    # Si no, se toma tal cual como Dólares.
                     if es_cliente_bs and "Bolívares" in moneda_pago:
                         monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 2)
                         detalle_referencia = f"{ref_clean} (Bs. {monto_reportado:,.2f} a tasa {tasa_bs_usd})"
@@ -437,7 +439,7 @@ if modo_vista == "👤 Portal del Cliente":
                             nombre_clean,
                             cuenta_destino,
                             detalle_referencia,
-                            float(monto_usd_convertido),  # Se guarda en USD
+                            float(monto_usd_convertido),
                             "PENDIENTE",
                         ]
                     )
@@ -1487,7 +1489,7 @@ else:
                             st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 9. CIERRE DE MES (CON VENTANA EMERGENTE PARA DETALLE DE GASTOS)
+        # 9. CIERRE DE MES
         # ------------------------------------------
         elif seccion_admin == "📅 Cierre de Mes":
             st.subheader("📅 Reporte Financiero Mensual")
