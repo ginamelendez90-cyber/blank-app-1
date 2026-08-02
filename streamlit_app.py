@@ -135,7 +135,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.1")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.2")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -428,6 +428,7 @@ else:
                 "⏳ Abonos por Verificar",
                 "📊 Flujo de Caja",
                 "➕ Registrar Movimiento Directo",
+                "🤝 Préstamos Externos",
                 "💼 Aportes / Retiros Dueño",
                 "🔄 Transferencias",
                 "📉 Gastos Operativos",
@@ -457,10 +458,12 @@ else:
             df_existente["Nombre"] = (
                 df_existente["Nombre"].astype(str).str.strip()
             )
+
+            # Filtrar clientes reales excluyendo cuentas de sistema, gastos y préstamos externos
             clientes_unicos = (
                 df_existente[
                     ~df_existente["Codigo"].str.contains(
-                        "CUENTA_|GASTO_|CAJA_", na=False
+                        "CUENTA_|GASTO_|CAJA_|PASIVO_EXT", na=False
                     )
                 ]
                 .drop_duplicates(subset=["Codigo"])
@@ -585,15 +588,14 @@ else:
                 st.error(f"Error al cargar pagos pendientes: {e}")
 
         # ------------------------------------------
-        # 2. FLUJO DE CAJA Y CARTERA (CON RESUMEN DIARIO)
+        # 2. FLUJO DE CAJA Y CARTERA (CON PRÉSTAMOS EXTERNOS)
         # ------------------------------------------
         elif seccion_admin == "📊 Flujo de Caja":
             try:
                 if not df_existente.empty:
-                    # Totales Generales
                     df_clientes = df_existente[
                         ~df_existente["Codigo"].str.contains(
-                            "CUENTA_|GASTO_|CAJA_", na=False
+                            "CUENTA_|GASTO_|CAJA_|PASIVO_EXT", na=False
                         )
                     ]
 
@@ -626,7 +628,15 @@ else:
                     total_caja = (
                         efectivo_total + pago_movil_total + binance_total
                     )
-                    cartera_total = total_caja + saldo_en_la_calle
+                    cartera_bruta = total_caja + saldo_en_la_calle
+
+                    # Deuda Externa acumulada
+                    df_ext = df_existente[df_existente["Codigo"] == "PASIVO_EXT"]
+                    deuda_externa_total = float(
+                        df_ext["Abono"].sum() - df_ext["Cargo"].sum()
+                    ) if not df_ext.empty else 0.0
+
+                    patrimonio_neto = cartera_bruta - deuda_externa_total
 
                     URL_BASE_APP = "https://blank-app-0gbuv8hf31pb.streamlit.app/"
                     resumen_clientes["Enlace_Reporte"] = (
@@ -637,16 +647,23 @@ else:
                     )
 
                     # --- MÉTRICAS DE PATRIMONIO ---
-                    c_car1, c_car2, c_car3 = st.columns(3)
+                    c_car1, c_car2, c_car3, c_car4 = st.columns(4)
                     c_car1.metric(
-                        "💎 Capital Total (Patrimonio)",
-                        f"${cartera_total:,.2f}",
+                        "💎 Capital Bruto Operativo",
+                        f"${cartera_bruta:,.2f}",
                     )
                     c_car2.metric(
-                        "🏦 Total Líquido en Cajas", f"${total_caja:,.2f}"
+                        "🤝 Deuda Externa (Pasivos)",
+                        f"${deuda_externa_total:,.2f}",
+                        delta=f"-${deuda_externa_total:,.2f}" if deuda_externa_total > 0 else "$0.00",
+                        delta_color="inverse",
                     )
                     c_car3.metric(
-                        "📌 Dinero Prestado en Calle",
+                        "🏛️ Patrimonio Neto Real",
+                        f"${patrimonio_neto:,.2f}",
+                    )
+                    c_car4.metric(
+                        "📌 Prestado a Clientes",
                         f"${saldo_en_la_calle:,.2f}",
                     )
 
@@ -666,13 +683,12 @@ else:
                     ).dt.strftime("%Y-%m-%d")
 
                     es_cli = ~df_diario_raw["Codigo"].str.contains(
-                        "CUENTA_|GASTO_|CAJA_", na=False
+                        "CUENTA_|GASTO_|CAJA_|PASIVO_EXT", na=False
                     )
                     es_gas = df_diario_raw["Codigo"].str.contains(
                         "GASTO_", na=False
                     )
 
-                    # Cobros diarios (Abonos de clientes)
                     cobros_df = (
                         df_diario_raw[es_cli]
                         .groupby("Fecha_Clean")["Abono"]
@@ -680,7 +696,6 @@ else:
                         .rename("Cobros del Día ($)")
                     )
 
-                    # Gastos diarios
                     gastos_df = (
                         df_diario_raw[es_gas]
                         .groupby("Fecha_Clean")["Cargo"]
@@ -688,7 +703,6 @@ else:
                         .rename("Gastos del Día ($)")
                     )
 
-                    # Préstamos entregados diarios (excluye registros de interés puro)
                     prestamos_df = (
                         df_diario_raw[
                             es_cli
@@ -703,12 +717,10 @@ else:
                         .rename("Préstamos Entregados ($)")
                     )
 
-                    # Combinar en tabla general
                     df_resumen_diario = pd.concat(
                         [cobros_df, gastos_df, prestamos_df], axis=1
                     ).fillna(0)
 
-                    # Calcular Flujo Neto = Cobros - Gastos - Préstamos
                     df_resumen_diario["Flujo Neto ($)"] = (
                         df_resumen_diario["Cobros del Día ($)"]
                         - df_resumen_diario["Gastos del Día ($)"]
@@ -719,7 +731,6 @@ else:
                         ascending=False
                     )
 
-                    # Métricas de la jornada de HOY
                     hoy_str = datetime.now().strftime("%Y-%m-%d")
                     cobros_hoy = (
                         df_resumen_diario.loc[hoy_str, "Cobros del Día ($)"]
@@ -1098,7 +1109,130 @@ else:
                                 st.error(f"Error al guardar: {e}")
 
         # ------------------------------------------
-        # 4. APORTES / RETIROS DUEÑO
+        # 4. PRÉSTAMOS EXTERNOS (PASIVOS)
+        # ------------------------------------------
+        elif seccion_admin == "🤝 Préstamos Externos":
+            st.subheader("🤝 Gestión de Préstamos Recibidos de Personas Externas")
+            st.caption(
+                "Registra el dinero que te prestan terceros (aumenta tu caja) y las devoluciones que realizas (descuenta de tu caja)."
+            )
+
+            col_ext1, col_ext2 = st.columns([1, 1])
+
+            with col_ext1:
+                with st.container(border=True):
+                    st.markdown("### 📥 Recibir Préstamo (+)")
+                    with st.form("form_recibir_prestamo_ext"):
+                        f_pe = st.date_input("Fecha de Recepción", datetime.now(), key="f_pe")
+                        nom_pe = st.text_input("Nombre del Prestamista Externa:", placeholder="Ej. Pedro Pérez")
+                        cta_pe = st.selectbox("Cuenta donde ingresa el dinero:", ["Efectivo", "Pago Móvil", "Binance"], key="cta_pe")
+                        monto_pe = st.number_input("Monto Recibido ($):", min_value=0.01, value=100.0, step=10.0, key="m_pe")
+                        obs_pe = st.text_input("Observación / Términos:", placeholder="Ej. A pagar en 30 días", key="o_pe")
+
+                        if st.form_submit_button("📥 Registrar Dinero Recibido", use_container_width=True):
+                            if nom_pe:
+                                try:
+                                    sheet = obtener_hoja()
+                                    desc = f"Préstamo externo recibido de {nom_pe.strip()} ({cta_pe})"
+                                    if obs_pe:
+                                        desc += f" - {obs_pe.strip()}"
+                                    
+                                    sheet.append_row([
+                                        f_pe.strftime("%Y-%m-%d"),
+                                        "PASIVO_EXT",
+                                        nom_pe.strip(),
+                                        desc,
+                                        0.0,
+                                        float(monto_pe)
+                                    ])
+                                    st.cache_data.clear()
+                                    st.toast(f"✅ Préstamo de ${monto_pe} registrado en {cta_pe}", icon="🤝")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error: {e}")
+                            else:
+                                st.warning("⚠️ Ingresa el nombre del prestamista.")
+
+            with col_ext2:
+                with st.container(border=True):
+                    st.markdown("### 📤 Devolver / Pagar Préstamo (-)")
+                    
+                    df_ext_prestamistas = df_existente[df_existente["Codigo"] == "PASIVO_EXT"]
+                    prestamistas_lista = df_ext_prestamistas["Nombre"].unique().tolist() if not df_ext_prestamistas.empty else []
+
+                    with st.form("form_pagar_prestamo_ext"):
+                        f_dev = st.date_input("Fecha de Devolución", datetime.now(), key="f_dev")
+                        
+                        if prestamistas_lista:
+                            nom_dev = st.selectbox("Seleccionar Prestamista:", prestamistas_lista)
+                        else:
+                            nom_dev = st.text_input("Nombre del Prestamista:", placeholder="Ej. Pedro Pérez")
+
+                        cta_dev = st.selectbox("Cuenta de donde sale el dinero:", ["Efectivo", "Pago Móvil", "Binance"], key="cta_dev")
+                        monto_dev = st.number_input("Monto a Devolver ($):", min_value=0.01, value=50.0, step=10.0, key="m_dev")
+                        obs_dev = st.text_input("Observación / Comprobante:", placeholder="Ej. Abono parcial", key="o_dev")
+
+                        if st.form_submit_button("📤 Registrar Pago / Devolución", use_container_width=True):
+                            if nom_dev:
+                                try:
+                                    sheet = obtener_hoja()
+                                    desc = f"Devolución de préstamo a {nom_dev.strip()} (Salida de {cta_dev})"
+                                    if obs_dev:
+                                        desc += f" - {obs_dev.strip()}"
+
+                                    sheet.append_row([
+                                        f_dev.strftime("%Y-%m-%d"),
+                                        "PASIVO_EXT",
+                                        nom_dev.strip(),
+                                        desc,
+                                        float(monto_dev),
+                                        0.0
+                                    ])
+                                    st.cache_data.clear()
+                                    st.toast(f"✅ Devolución de ${monto_dev} registrada desde {cta_dev}", icon="💸")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error: {e}")
+                            else:
+                                st.warning("⚠️ Selecciona o escribe un prestamista.")
+
+            st.divider()
+            st.subheader("📋 Resumen de Deudas con Personas Externas")
+
+            if not df_ext_prestamistas.empty:
+                resumen_ext = df_ext_prestamistas.groupby("Nombre").agg(
+                    Total_Prestado=("Abono", "sum"),
+                    Total_Devuelto=("Cargo", "sum")
+                ).reset_index()
+
+                resumen_ext["Saldo_Pendiente_Deuda"] = resumen_ext["Total_Prestado"] - resumen_ext["Total_Devuelto"]
+
+                m_ext_tot, m_ext_dev, m_ext_pen = st.columns(3)
+                m_ext_tot.metric("📥 Total Recibido de Terceros", f"${resumen_ext['Total_Prestado'].sum():,.2f}")
+                m_ext_dev.metric("📤 Total Develto a Terceros", f"${resumen_ext['Total_Devuelto'].sum():,.2f}")
+                m_ext_pen.metric(
+                    "⚠️ Deuda Externa Pendiente",
+                    f"${resumen_ext['Saldo_Pendiente_Deuda'].sum():,.2f}",
+                    delta=f"-${resumen_ext['Saldo_Pendiente_Deuda'].sum():,.2f}" if resumen_ext['Saldo_Pendiente_Deuda'].sum() > 0 else "$0.00",
+                    delta_color="inverse"
+                )
+
+                st.dataframe(
+                    resumen_ext,
+                    column_config={
+                        "Nombre": "Prestamista Externa",
+                        "Total_Prestado": st.column_config.NumberColumn("Total Recibido ($)", format="$%.2f"),
+                        "Total_Devuelto": st.column_config.NumberColumn("Total Devuelto ($)", format="$%.2f"),
+                        "Saldo_Pendiente_Deuda": st.column_config.NumberColumn("Deuda Pendiente ($)", format="$%.2f"),
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("💡 Aún no se han registrado préstamos de personas externas.")
+
+        # ------------------------------------------
+        # 5. APORTES / RETIROS DUEÑO
         # ------------------------------------------
         elif seccion_admin == "💼 Aportes / Retiros Dueño":
             with st.container(border=True):
@@ -1151,7 +1285,7 @@ else:
                             st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 5. TRANSFERENCIAS
+        # 6. TRANSFERENCIAS
         # ------------------------------------------
         elif seccion_admin == "🔄 Transferencias":
             with st.container(border=True):
@@ -1202,7 +1336,7 @@ else:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 6. GASTOS OPERATIVOS
+        # 7. GASTOS OPERATIVOS
         # ------------------------------------------
         elif seccion_admin == "📉 Gastos Operativos":
             with st.container(border=True):
@@ -1239,7 +1373,7 @@ else:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 7. LIQUIDAR CRÉDITO
+        # 8. LIQUIDAR CRÉDITO
         # ------------------------------------------
         elif seccion_admin == "✂️ Liquidar Crédito":
             with st.container(border=True):
@@ -1277,7 +1411,7 @@ else:
                             st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 8. CIERRE DE MES
+        # 9. CIERRE DE MES
         # ------------------------------------------
         elif seccion_admin == "📅 Cierre de Mes":
             st.subheader("📅 Reporte Financiero Mensual")
@@ -1304,7 +1438,7 @@ else:
                     ]["Cargo"].sum()
 
                     df_clientes_mes = df_mes[
-                        ~df_mes["Codigo"].str.contains("CUENTA_|GASTO_|CAJA_", na=False)
+                        ~df_mes["Codigo"].str.contains("CUENTA_|GASTO_|CAJA_|PASIVO_EXT", na=False)
                     ]
                     prestado_mes = df_clientes_mes[
                         ~df_clientes_mes["Concepto"].str.contains("Interés aplicado", case=False, na=False)
