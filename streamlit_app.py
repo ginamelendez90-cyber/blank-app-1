@@ -18,7 +18,6 @@ def es_dia_cobro(fecha_obj):
     if fecha_obj.weekday() == 6:  # 6 = Domingo
         return False
     
-    # Días festivos fijos (Día, Mes)
     festivos_fijos = [
         (1, 1),   # Año Nuevo
         (19, 4),  # Declaración de Independencia
@@ -237,7 +236,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v4.1")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v4.2")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -407,14 +406,17 @@ if modo_vista == "👤 Portal del Cliente":
                         if es_cliente_bs:
                             tasa_fija = obtener_tasa_concepto(concepto, tasa_bs_usd)
                             if "interés aplicado" in concepto_lower or "interes aplicado" in concepto_lower:
-                                return cargo * 1.75 * tasa_fija
-                            return cargo * tasa_fija
+                                return round(cargo * 1.75 * tasa_fija, 2)
+                            return round(cargo * tasa_fija, 2)
                         return cargo
 
                     def calcular_abono_vista(row):
                         abono = float(row["Abono"])
+                        concepto = str(row["Concepto"])
                         if es_cliente_bs:
-                            return abono * tasa_bs_usd
+                            # Utiliza la tasa exacta histórica registrada al abonar
+                            tasa_registro = obtener_tasa_concepto(concepto, tasa_bs_usd)
+                            return round(abono * tasa_registro, 2)
                         return abono
 
                     if not mov_actuales.empty:
@@ -428,7 +430,7 @@ if modo_vista == "👤 Portal del Cliente":
                         prestamo_vis, pagos_vis, saldo_vis = 0.0, 0.0, 0.0
 
                     # ----------------------------------------------------
-                    # LÓGICA DE ESTATUS: AL DÍA VS ATRASADO (EXCLUYE DOMINGOS, FESTIVOS Y APLICA 1 DÍA DE GRACIA)
+                    # LÓGICA DE ESTATUS: AL DÍA VS ATRASADO (1 DÍA DE GRACIA)
                     # ----------------------------------------------------
                     estado_cliente = "🟢 AL DÍA"
                     detalle_estatus = "Su crédito está al día."
@@ -459,7 +461,6 @@ if modo_vista == "👤 Portal del Cliente":
                             elif "mensual" in frecuencia_lower:
                                 cuotas_esperadas = min(dias_cobro // 24, num_cuotas_p)
                             else:
-                                # Diario por defecto
                                 cuotas_esperadas = min(dias_cobro, num_cuotas_p)
 
                             monto_esperado_hoy = cuotas_esperadas * cuota_monto_vis
@@ -609,7 +610,7 @@ if modo_vista == "👤 Portal del Cliente":
                     es_cliente_bs = codigo_final in lista_clientes_bs
 
                     if es_cliente_bs and "Bolívares" in moneda_pago:
-                        monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 2)
+                        monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 4)
                         detalle_referencia = f"{ref_clean} (Bs. {monto_reportado:,.2f} a tasa {tasa_bs_usd})"
                     else:
                         monto_usd_convertido = round(monto_reportado, 2)
@@ -794,12 +795,17 @@ else:
                                 ):
                                     try:
                                         sheet_principal = obtener_hoja()
+                                        
+                                        # Verifica si el cliente cobra en Bs para congelar su tasa al aprobar
+                                        es_cli_bs = str(fila["Codigo"]).strip().upper() in lista_clientes_bs
+                                        tag_tasa_pago = f" (Tasa: {tasa_bs_usd})" if es_cli_bs else ""
+                                        
                                         sheet_principal.append_row(
                                             [
                                                 str(fila["Fecha"]),
                                                 str(fila["Codigo"]),
                                                 str(fila["Nombre"]),
-                                                f"Abono verificado Ref: {fila['Referencia']} ({fila['Cuenta']})",
+                                                f"Abono verificado Ref: {fila['Referencia']} ({fila['Cuenta']}){tag_tasa_pago}",
                                                 0.0,
                                                 float(fila["Monto"]),
                                             ]
@@ -883,7 +889,6 @@ else:
                         es_cliente_bs = cod_clean in lista_clientes_bs
                         moneda_label = "Bs." if es_cliente_bs else "$"
 
-                        # Separa ciclo actual de créditos históricos
                         indices_liq = resultado[
                             resultado["Concepto"].str.contains("Crédito anterior liquidado", case=False, na=False)
                         ].index
@@ -904,13 +909,17 @@ else:
                             if es_cliente_bs:
                                 tasa_fija = obtener_tasa_concepto(c_str, tasa_bs_usd)
                                 if "interés aplicado" in c_lower or "interes aplicado" in c_lower:
-                                    return cargo * 1.75 * tasa_fija
-                                return cargo * tasa_fija
+                                    return round(cargo * 1.75 * tasa_fija, 2)
+                                return round(cargo * tasa_fija, 2)
                             return cargo
 
                         def calc_abono(row):
                             abono = float(row["Abono"])
-                            return abono * tasa_bs_usd if es_cliente_bs else abono
+                            c_str = str(row["Concepto"])
+                            if es_cliente_bs:
+                                tasa_reg = obtener_tasa_concepto(c_str, tasa_bs_usd)
+                                return round(abono * tasa_reg, 2)
+                            return abono
 
                         mov_actuales["Cargo_Vis"] = mov_actuales.apply(calc_cargo, axis=1)
                         mov_actuales["Abono_Vis"] = mov_actuales.apply(calc_abono, axis=1)
@@ -943,7 +952,6 @@ else:
                                 elif "mensual" in frecuencia_lower:
                                     cuotas_esperadas = min(dias_cobro // 24, num_cuotas_p)
                                 else:
-                                    # Diario
                                     cuotas_esperadas = min(dias_cobro, num_cuotas_p)
 
                                 monto_esperado_hoy = cuotas_esperadas * cuota_monto_vis
@@ -1526,9 +1534,7 @@ else:
                                         == "Registrar Abono / Pago Directo"
                                     )
                                     if m1_usd > 0:
-                                        desc_m1 = f"{desc_base} ({c_1 if is_abono else 'Salida de ' + c_1})"
-                                        if not is_abono:
-                                            desc_m1 += tag_tasa
+                                        desc_m1 = f"{desc_base} ({c_1 if is_abono else 'Salida de ' + c_1}){tag_tasa}"
                                         filas_a_agregar.append(
                                             [
                                                 nueva_fecha.strftime(
@@ -1542,9 +1548,7 @@ else:
                                             ]
                                         )
                                     if m2_usd > 0:
-                                        desc_m2 = f"{desc_base} ({c_2 if is_abono else 'Salida de ' + c_2})"
-                                        if not is_abono:
-                                            desc_m2 += tag_tasa
+                                        desc_m2 = f"{desc_base} ({c_2 if is_abono else 'Salida de ' + c_2}){tag_tasa}"
                                         filas_a_agregar.append(
                                             [
                                                 nueva_fecha.strftime(
@@ -1567,9 +1571,7 @@ else:
                                         tipo_movimiento
                                         == "Registrar Abono / Pago Directo"
                                     )
-                                    desc_fin = f"{desc_base} ({cuenta_afectada if is_abono else 'Salida de ' + cuenta_afectada})"
-                                    if not is_abono:
-                                        desc_fin += tag_tasa
+                                    desc_fin = f"{desc_base} ({cuenta_afectada if is_abono else 'Salida de ' + cuenta_afectada}){tag_tasa}"
                                     filas_a_agregar.append(
                                         [
                                             nueva_fecha.strftime("%Y-%m-%d"),
