@@ -124,6 +124,16 @@ def guardar_configuracion_persistente(nueva_tasa, nuevos_codigos):
         return False
 
 
+def registrar_codigo_bs_si_no_existe(codigo, lista_actual_str, tasa_actual):
+    """Asegura que un cliente en Bs quede registrado automáticamente en la lista general."""
+    cod_clean = str(codigo).strip().upper()
+    lista_cods = [c.strip().upper() for c in lista_actual_str.split(",") if c.strip()]
+    if cod_clean not in lista_cods:
+        lista_cods.append(cod_clean)
+        nueva_str = ", ".join(lista_cods)
+        guardar_configuracion_persistente(tasa_actual, nueva_str)
+
+
 def calcular_saldo_cuenta(df, cuenta_nombre):
     if df.empty:
         return 0.0
@@ -181,7 +191,7 @@ st.sidebar.image(
     "https://img.icons8.com/fluency/96/money-bag-with-card.png", width=80
 )
 st.sidebar.title("Control Financiero")
-st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.8")
+st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v3.9")
 st.sidebar.divider()
 
 st.sidebar.subheader("🔒 Acceso Admin")
@@ -1001,22 +1011,35 @@ else:
                 st.error(f"Error al calcular flujo de caja: {e}")
 
         # ------------------------------------------
-        # 3. REGISTRAR MOVIMIENTO DIRECTO
+        # 3. REGISTRAR MOVIMIENTO DIRECTO (CON OPCIÓN DE MONEDA Y LÓGICA 35% BS)
         # ------------------------------------------
         elif seccion_admin == "➕ Registrar Movimiento Directo":
             with st.container(border=True):
-                st.subheader(
-                    "📝 Registrar Crédito o Pago Directo (Sin Verificación previa)"
-                )
+                st.subheader("📝 Registrar Crédito o Pago Directo")
 
-                tipo_movimiento = st.radio(
-                    "Operación a realizar:",
+                col_tp1, col_tp2 = st.columns(2)
+                tipo_movimiento = col_tp1.radio(
+                    "Tipo de Operación:",
                     [
                         "Registrar Abono / Pago Directo",
                         "Registrar Préstamo / Deuda Inicial",
                     ],
                     horizontal=True,
                 )
+
+                moneda_operacion = col_tp2.radio(
+                    "Moneda de la Operación:",
+                    ["Dólares ($)", "Bolívares (Bs.)"],
+                    horizontal=True,
+                )
+
+                es_bs = moneda_operacion == "Bolívares (Bs.)"
+
+                if es_bs:
+                    st.info(
+                        f"💱 **Operación en Bolívares:** Se utilizará la tasa registrada de **{tasa_bs_usd} Bs/$**.\n"
+                        f"Al cliente se le asignará automáticamente el **35% de interés en Bs.** en su Estado de Cuenta y en tu contabilidad quedará respaldado en USD."
+                    )
 
                 usar_dos_cuentas = st.checkbox(
                     "🔀 Dividir monto entre DOS cuentas (Ej. Efectivo + Binance)"
@@ -1046,9 +1069,7 @@ else:
                     )
 
                 with st.form("form_nuevo_registro", border=False):
-                    nueva_fecha = st.date_input(
-                        "Fecha de Operación", datetime.now()
-                    )
+                    nueva_fecha = st.date_input("Fecha de Operación", datetime.now())
 
                     tipo_cobro_abono = "Abono General"
                     if tipo_movimiento == "Registrar Abono / Pago Directo":
@@ -1061,8 +1082,8 @@ else:
                             ],
                         )
 
-                    monto = 0.0
-                    monto_total_calculado = 0.0
+                    monto_usd_final = 0.0
+                    monto_bs_final = 0.0
 
                     if usar_dos_cuentas:
                         col_m1, col_m2 = st.columns(2)
@@ -1071,8 +1092,8 @@ else:
                             ["Efectivo", "Pago Móvil", "Binance"],
                             key="c1",
                         )
-                        monto_c1 = col_m1.number_input(
-                            f"Monto USD ({c_1}) ($)",
+                        m_c1 = col_m1.number_input(
+                            f"Monto ({'Bs.' if es_bs else '$'}) ({c_1})",
                             min_value=0.0,
                             value=0.0,
                             key="mc1",
@@ -1085,19 +1106,29 @@ else:
                         c_2 = col_m2.selectbox(
                             "Segunda Cuenta", otras_cuentas, key="c2"
                         )
-                        monto_c2 = col_m2.number_input(
-                            f"Monto USD ({c_2}) ($)",
+                        m_c2 = col_m2.number_input(
+                            f"Monto ({'Bs.' if es_bs else '$'}) ({c_2})",
                             min_value=0.0,
                             value=0.0,
                             key="mc2",
                         )
-                        monto_total_calculado = monto_c1 + monto_c2
+                        monto_ingresado_total = m_c1 + m_c2
+                        m1_usd = m_c1 / tasa_bs_usd if es_bs else m_c1
+                        m2_usd = m_c2 / tasa_bs_usd if es_bs else m_c2
+                        monto_usd_final = m1_usd + m2_usd
                     else:
-                        monto = st.number_input(
-                            "Monto USD ($)", min_value=0.0, value=0.0
+                        monto_ingresado = st.number_input(
+                            f"Monto a Entregar/Abonar ({'Bs.' if es_bs else 'USD $'}):",
+                            min_value=0.0,
+                            value=1000.0 if es_bs else 100.0,
+                            step=100.0 if es_bs else 10.0,
+                        )
+                        monto_ingresado_total = monto_ingresado
+                        monto_usd_final = (
+                            monto_ingresado / tasa_bs_usd if es_bs else monto_ingresado
                         )
 
-                    tasa_interes, monto_interes_calc = 0.0, 0.0
+                    tasa_interes_registro = 20.0
                     frecuencia_pago, num_cuotas, valor_cuota_calc = (
                         "Diario",
                         1,
@@ -1106,13 +1137,26 @@ else:
 
                     if tipo_movimiento == "Registrar Préstamo / Deuda Inicial":
                         st.markdown("---")
+                        st.subheader("⚙️ Condiciones del Préstamo")
                         cp1, cp2, cp3 = st.columns(3)
-                        # Interés del sistema se registra por defecto al 20%
-                        tasa_interes = cp1.number_input(
-                            "Interés Sistema (%)", min_value=0.0, value=20.0, step=1.0
-                        )
+
+                        if es_bs:
+                            cp1.text_input(
+                                "Tasa de Interés Cliente:",
+                                value="35.0% (En Bolívares)",
+                                disabled=True,
+                            )
+                            tasa_interes_registro = 20.0  # Registrado contablemente al 20% USD
+                        else:
+                            tasa_interes_registro = cp1.number_input(
+                                "Interés Sistema (%)",
+                                min_value=0.0,
+                                value=20.0,
+                                step=1.0,
+                            )
+
                         frecuencia_pago = cp2.selectbox(
-                            "Frecuencia",
+                            "Frecuencia de Pago",
                             ["Diario", "Semanal", "Quincenal", "Mensual"],
                         )
                         num_cuotas = cp3.number_input(
@@ -1122,26 +1166,40 @@ else:
                             step=1,
                         )
 
-                        monto_base_calc = (
-                            monto_total_calculado if usar_dos_cuentas else monto
-                        )
-                        monto_interes_calc = monto_base_calc * (
-                            tasa_interes / 100
-                        )
-                        deuda_total_calc = (
-                            monto_base_calc + monto_interes_calc
-                        )
-                        valor_cuota_calc = (
-                            deuda_total_calc / num_cuotas
-                            if num_cuotas > 0
-                            else 0.0
-                        )
+                        if es_bs:
+                            cap_bs = monto_ingresado_total
+                            int_bs = cap_bs * 0.35
+                            tot_bs = cap_bs + int_bs
+                            cuota_bs = tot_bs / num_cuotas if num_cuotas > 0 else 0.0
 
-                        if monto_base_calc > 0:
-                            st.info(
-                                f"💵 **Capital ($):** ${monto_base_calc:,.2f} | 📈 **Interés Sistema ({tasa_interes}%):** ${monto_interes_calc:,.2f} | ⚠️ **Total ($):** ${deuda_total_calc:,.2f}\n\n"
-                                f"👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **${valor_cuota_calc:,.2f} USD**"
+                            monto_interes_usd_calc = monto_usd_final * 0.20
+
+                            if cap_bs > 0:
+                                st.info(
+                                    f"📊 **VISTA CLIENTE (35% en Bolívares):**\n"
+                                    f"* **Capital:** Bs. {cap_bs:,.2f}\n"
+                                    f"* **Interés (35%):** Bs. {int_bs:,.2f}\n"
+                                    f"* **Deuda Total Cliente:** Bs. {tot_bs:,.2f}\n"
+                                    f"* 👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **Bs. {cuota_bs:,.2f}**\n\n"
+                                    f"💼 **RESPALDO CONTABLE INTERNO (USD @ Tasa {tasa_bs_usd}):**\n"
+                                    f"* Capital: ${monto_usd_final:,.2f} USD | Interés Registrado (20%): ${monto_interes_usd_calc:,.2f} USD"
+                                )
+                        else:
+                            monto_interes_usd_calc = monto_usd_final * (
+                                tasa_interes_registro / 100.0
                             )
+                            deuda_tot_usd = monto_usd_final + monto_interes_usd_calc
+                            cuota_usd = (
+                                deuda_tot_usd / num_cuotas if num_cuotas > 0 else 0.0
+                            )
+
+                            if monto_usd_final > 0:
+                                st.info(
+                                    f"💵 **Capital ($):** ${monto_usd_final:,.2f} | 📈 **Interés ({tasa_interes_registro}%):** ${monto_interes_usd_calc:,.2f} | ⚠️ **Total ($):** ${deuda_tot_usd:,.2f}\n\n"
+                                    f"👉 **{num_cuotas} cuotas {frecuencia_pago.lower()}s** de **${cuota_usd:,.2f} USD**"
+                                )
+                    else:
+                        monto_interes_usd_calc = 0.0
 
                     concepto_personalizado = st.text_input(
                         "Notas u observaciones (Opcional)"
@@ -1156,17 +1214,27 @@ else:
                                 sheet = obtener_hoja()
                                 filas_a_agregar = []
 
+                                if es_bs:
+                                    registrar_codigo_bs_si_no_existe(
+                                        nuevo_codigo, codigos_bs_str, tasa_bs_usd
+                                    )
+
+                                cuota_txt = (
+                                    f"Bs. {(monto_ingresado_total * 1.35) / num_cuotas:,.2f}"
+                                    if es_bs
+                                    else f"${(monto_usd_final * (1 + tasa_interes_registro/100)) / num_cuotas:,.2f}"
+                                )
                                 desc_base = (
                                     f"{tipo_cobro_abono}"
                                     if tipo_movimiento
                                     == "Registrar Abono / Pago Directo"
-                                    else f"Préstamo {frecuencia_pago} ({num_cuotas} cuotas de ${valor_cuota_calc:,.2f})"
+                                    else f"Préstamo {frecuencia_pago} ({num_cuotas} cuotas de {cuota_txt})"
                                 )
                                 if concepto_personalizado:
                                     desc_base += f" - {concepto_personalizado}"
 
                                 if usar_dos_cuentas:
-                                    if monto_total_calculado <= 0:
+                                    if monto_usd_final <= 0:
                                         st.error(
                                             "⚠️ Ingrese un monto mayor a cero."
                                         )
@@ -1175,7 +1243,7 @@ else:
                                         tipo_movimiento
                                         == "Registrar Abono / Pago Directo"
                                     )
-                                    if monto_c1 > 0:
+                                    if m1_usd > 0:
                                         filas_a_agregar.append(
                                             [
                                                 nueva_fecha.strftime(
@@ -1184,11 +1252,11 @@ else:
                                                 str(nuevo_codigo).strip(),
                                                 nuevo_nombre,
                                                 f"{desc_base} ({c_1 if is_abono else 'Salida de ' + c_1})",
-                                                0.0 if is_abono else float(monto_c1),
-                                                float(monto_c1) if is_abono else 0.0,
+                                                0.0 if is_abono else float(m1_usd),
+                                                float(m1_usd) if is_abono else 0.0,
                                             ]
                                         )
-                                    if monto_c2 > 0:
+                                    if m2_usd > 0:
                                         filas_a_agregar.append(
                                             [
                                                 nueva_fecha.strftime(
@@ -1197,12 +1265,12 @@ else:
                                                 str(nuevo_codigo).strip(),
                                                 nuevo_nombre,
                                                 f"{desc_base} ({c_2 if is_abono else 'Salida de ' + c_2})",
-                                                0.0 if is_abono else float(monto_c2),
-                                                float(monto_c2) if is_abono else 0.0,
+                                                0.0 if is_abono else float(m2_usd),
+                                                float(m2_usd) if is_abono else 0.0,
                                             ]
                                         )
                                 else:
-                                    if monto <= 0:
+                                    if monto_usd_final <= 0:
                                         st.error(
                                             "⚠️ Ingrese un monto mayor a cero."
                                         )
@@ -1217,23 +1285,23 @@ else:
                                             str(nuevo_codigo).strip(),
                                             nuevo_nombre,
                                             f"{desc_base} ({cuenta_afectada if is_abono else 'Salida de ' + cuenta_afectada})",
-                                            0.0 if is_abono else float(monto),
-                                            float(monto) if is_abono else 0.0,
+                                            0.0 if is_abono else float(monto_usd_final),
+                                            float(monto_usd_final) if is_abono else 0.0,
                                         ]
                                     )
 
                                 if (
                                     tipo_movimiento
                                     == "Registrar Préstamo / Deuda Inicial"
-                                    and monto_interes_calc > 0
+                                    and monto_interes_usd_calc > 0
                                 ):
                                     filas_a_agregar.append(
                                         [
                                             nueva_fecha.strftime("%Y-%m-%d"),
                                             str(nuevo_codigo).strip(),
                                             nuevo_nombre,
-                                            f"Interés aplicado ({tasa_interes}%)",
-                                            float(monto_interes_calc),
+                                            f"Interés aplicado ({'35% Bs.' if es_bs else str(tasa_interes_registro) + '%'})",
+                                            float(monto_interes_usd_calc),
                                             0.0,
                                         ]
                                     )
@@ -1244,7 +1312,7 @@ else:
                                 st.cache_data.clear()
 
                                 st.toast(
-                                    f"🎉 Movimiento guardado para {nuevo_nombre}",
+                                    f"🎉 Movimiento guardado exitosamente para {nuevo_nombre}",
                                     icon="✅",
                                 )
                                 st.rerun()
