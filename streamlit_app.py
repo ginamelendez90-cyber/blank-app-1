@@ -233,9 +233,9 @@ lista_clientes_bs = [
 # BARRA LATERAL (AUTENTICACIÓN Y NAVEGACIÓN)
 # ==========================================
 st.sidebar.image(
-    "https://img.icons8.com/?size=100&id=51oKaN3XSMKu&format=png&color=000000", width=80
+    "https://img.icons8.com/?size=100&id=51oKaN3XSMKu&format=png&color=000000", width=100
 )
-st.sidebar.title("Control Financiero")
+st.sidebar.title("CONTROL FINANCIERO")
 st.sidebar.caption("Gestión de Cobros, Cuentas y Préstamos v4.2")
 st.sidebar.divider()
 
