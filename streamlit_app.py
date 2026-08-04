@@ -1165,47 +1165,57 @@ else:
                         ascending=False
                     )
 
+                    # Integración de selector de fecha para ver jornada actual o historial de días pasados
                     hoy_str = datetime.now().strftime("%Y-%m-%d")
-                    cobros_hoy = (
-                        df_resumen_diario.loc[hoy_str, "Cobros del Día ($)"]
-                        if hoy_str in df_resumen_diario.index
+                    
+                    fecha_seleccionada_jornada = st.date_input(
+                        "Selecciona la fecha para ver la jornada o historial:",
+                        value=datetime.now().date(),
+                        format="YYYY-MM-DD",
+                        key="selector_fecha_jornada"
+                    )
+                    fecha_consulta_str = fecha_seleccionada_jornada.strftime("%Y-%m-%d")
+
+                    cobros_dia = (
+                        df_resumen_diario.loc[fecha_consulta_str, "Cobros del Día ($)"]
+                        if fecha_consulta_str in df_resumen_diario.index
                         else 0.0
                     )
-                    gastos_hoy = (
-                        df_resumen_diario.loc[hoy_str, "Gastos del Día ($)"]
-                        if hoy_str in df_resumen_diario.index
+                    gastos_dia = (
+                        df_resumen_diario.loc[fecha_consulta_str, "Gastos del Día ($)"]
+                        if fecha_consulta_str in df_resumen_diario.index
                         else 0.0
                     )
-                    neto_hoy = (
-                        df_resumen_diario.loc[hoy_str, "Flujo Neto ($)"]
-                        if hoy_str in df_resumen_diario.index
+                    neto_dia = (
+                        df_resumen_diario.loc[fecha_consulta_str, "Flujo Neto ($)"]
+                        if fecha_consulta_str in df_resumen_diario.index
                         else 0.0
                     )
 
-                    df_hoy_cobros = df_diario_raw[(df_diario_raw["Fecha_Clean"] == hoy_str) & es_cli & (df_diario_raw["Abono"] > 0)]
-                    cobro_efectivo_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Efectivo", case=False, na=False)]["Abono"].sum()
-                    cobro_pm_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Pago Móvil", case=False, na=False)]["Abono"].sum()
-                    cobro_binance_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Binance", case=False, na=False)]["Abono"].sum()
+                    df_dia_cobros = df_diario_raw[(df_diario_raw["Fecha_Clean"] == fecha_consulta_str) & es_cli & (df_diario_raw["Abono"] > 0)]
+                    cobro_efectivo_dia = df_dia_cobros[df_dia_cobros["Concepto"].str.contains("Efectivo", case=False, na=False)]["Abono"].sum()
+                    cobro_pm_dia = df_dia_cobros[df_dia_cobros["Concepto"].str.contains("Pago Móvil", case=False, na=False)]["Abono"].sum()
+                    cobro_binance_dia = df_dia_cobros[df_dia_cobros["Concepto"].str.contains("Binance", case=False, na=False)]["Abono"].sum()
 
                     with st.container(border=True):
-                        st.markdown(f"#### 🟢 Jornada de Hoy (`{hoy_str}`)")
+                        st.markdown(f"#### 🟢 Jornada (`{fecha_consulta_str}`)")
                         d_col1, d_col2, d_col3 = st.columns(3)
                         
                         with d_col1:
-                            st.metric("💵 Cobrado Hoy", f"${cobros_hoy:,.2f}")
+                            st.metric("💵 Cobrado en la Fecha", f"${cobros_dia:,.2f}")
                             with st.popover("Ver detalle de movimientos"):
-                                st.markdown("### 💰 Desglose de Ingresos Hoy")
-                                st.write(f"**💵 Efectivo:** ${cobro_efectivo_hoy:,.2f}")
-                                st.write(f"**📱 Pago Móvil:** ${cobro_pm_hoy:,.2f}")
-                                st.write(f"**🟡 Binance:** ${cobro_binance_hoy:,.2f}")
+                                st.markdown(f"### 💰 Desglose de Ingresos ({fecha_consulta_str})")
+                                st.write(f"**💵 Efectivo:** ${cobro_efectivo_dia:,.2f}")
+                                st.write(f"**📱 Pago Móvil:** ${cobro_pm_dia:,.2f}")
+                                st.write(f"**🟡 Binance:** ${cobro_binance_dia:,.2f}")
                                 st.divider()
-                                st.write(f"**Total Cobrado:** ${cobros_hoy:,.2f}")
+                                st.write(f"**Total Cobrado:** ${cobros_dia:,.2f}")
 
-                        d_col2.metric("📉 Gastado Hoy", f"${gastos_hoy:,.2f}")
+                        d_col2.metric("📉 Gastado en la Fecha", f"${gastos_dia:,.2f}")
                         d_col3.metric(
-                            "💰 Flujo Neto de Hoy",
-                            f"${neto_hoy:,.2f}",
-                            delta=f"${neto_hoy:,.2f}",
+                            "💰 Flujo Neto de la Fecha",
+                            f"${neto_dia:,.2f}",
+                            delta=f"${neto_dia:,.2f}",
                         )
 
                     col_tabla_d, col_grafico_d = st.columns([1.3, 1])
@@ -1272,7 +1282,6 @@ else:
                         with st.container(border=True):
                             st.subheader("🏦 Saldos Por Cuenta")
                             
-                            # Apartado con la suma total agregada dentro del mismo cuadro
                             st.metric(
                                 label="💎 Total General en Cuentas", 
                                 value=f"${total_caja:,.2f}",
@@ -1982,7 +1991,7 @@ else:
                             mostrar_detalle_gastos(df_gastos_mes)
 
                     m4.metric(
-                        "💰 Ganancia Neta",
+                        "💰 Ganancia Neta Real",
                         f"${ganancia_neta:,.2f}",
                         delta=f"${ganancia_neta:,.2f}",
                     )
