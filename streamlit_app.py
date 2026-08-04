@@ -1188,7 +1188,7 @@ else:
                     cobro_binance_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Binance", case=False, na=False)]["Abono"].sum()
 
                     with st.container(border=True):
-                        st.markdown(f"#### 🟢 Jornada de Hoy (`{hoy_str}`)")
+                        st.markdown(f"#### 🟢 Jornada de Hoy (`{fecha_str}`)")
                         d_col1, d_col2, d_col3 = st.columns(3)
                         
                         with d_col1:
