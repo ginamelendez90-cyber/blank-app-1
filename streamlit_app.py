@@ -1186,10 +1186,26 @@ else:
                         else 0.0
                     )
 
+                    # Cálculo del desglose de cobros del día actual para el popover
+                    df_hoy_cobros = df_diario_raw[(df_diario_raw["Fecha_Clean"] == hoy_str) & es_cli & (df_diario_raw["Abono"] > 0)]
+                    cobro_efectivo_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Efectivo", case=False, na=False)]["Abono"].sum()
+                    cobro_pm_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Pago Móvil", case=False, na=False)]["Abono"].sum()
+                    cobro_binance_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Binance", case=False, na=False)]["Abono"].sum()
+
                     with st.container(border=True):
                         st.markdown(f"#### 🟢 Jornada de Hoy (`{hoy_str}`)")
                         d_col1, d_col2, d_col3 = st.columns(3)
-                        d_col1.metric("💵 Cobrado Hoy", f"${cobros_hoy:,.2f}")
+                        
+                        with d_col1:
+                            st.metric("💵 Cobrado Hoy", f"${cobros_hoy:,.2f}")
+                            with st.popover("Ver detalle de movimientos"):
+                                st.markdown("### 💰 Desglose de Ingresos Hoy")
+                                st.write(f"**💵 Efectivo:** ${cobro_efectivo_hoy:,.2f}")
+                                st.write(f"**📱 Pago Móvil:** ${cobro_pm_hoy:,.2f}")
+                                st.write(f"**🟡 Binance:** ${cobro_binance_hoy:,.2f}")
+                                st.divider()
+                                st.write(f"**Total Cobrado:** ${cobros_hoy:,.2f}")
+
                         d_col2.metric("📉 Gastado Hoy", f"${gastos_hoy:,.2f}")
                         d_col3.metric(
                             "💰 Flujo Neto de Hoy",
