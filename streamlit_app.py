@@ -414,7 +414,6 @@ if modo_vista == "👤 Portal del Cliente":
                         abono = float(row["Abono"])
                         concepto = str(row["Concepto"])
                         if es_cliente_bs:
-                            # Utiliza la tasa exacta histórica registrada al abonar
                             tasa_registro = obtener_tasa_concepto(concepto, tasa_bs_usd)
                             return round(abono * tasa_registro, 2)
                         return abono
@@ -451,7 +450,6 @@ if modo_vista == "👤 Portal del Cliente":
 
                             frecuencia_lower = concepto_p.lower()
 
-                            # Descuenta 1 día por concepto de GRACIA
                             dias_cobro = max(0, calcular_dias_cobro_acumulados(f_inicio, f_hoy) - 1)
 
                             if "semanal" in frecuencia_lower:
@@ -796,7 +794,6 @@ else:
                                     try:
                                         sheet_principal = obtener_hoja()
                                         
-                                        # Verifica si el cliente cobra en Bs para congelar su tasa al aprobar
                                         es_cli_bs = str(fila["Codigo"]).strip().upper() in lista_clientes_bs
                                         tag_tasa_pago = f" (Tasa: {tasa_bs_usd})" if es_cli_bs else ""
                                         
@@ -942,7 +939,6 @@ else:
 
                                 frecuencia_lower = concepto_p.lower()
 
-                                # APLICA 1 DÍA DE GRACIA DESCONTANDO 1 DÍA HÁBIL
                                 dias_cobro = max(0, calcular_dias_cobro_acumulados(f_inicio, f_hoy) - 1)
 
                                 if "semanal" in frecuencia_lower:
@@ -1186,7 +1182,6 @@ else:
                         else 0.0
                     )
 
-                    # Cálculo del desglose de cobros del día actual para el popover
                     df_hoy_cobros = df_diario_raw[(df_diario_raw["Fecha_Clean"] == hoy_str) & es_cli & (df_diario_raw["Abono"] > 0)]
                     cobro_efectivo_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Efectivo", case=False, na=False)]["Abono"].sum()
                     cobro_pm_hoy = df_hoy_cobros[df_hoy_cobros["Concepto"].str.contains("Pago Móvil", case=False, na=False)]["Abono"].sum()
@@ -1276,6 +1271,15 @@ else:
                     with col_cuentas:
                         with st.container(border=True):
                             st.subheader("🏦 Saldos Por Cuenta")
+                            
+                            # Apartado con la suma total agregada dentro del mismo cuadro
+                            st.metric(
+                                label="💎 Total General en Cuentas", 
+                                value=f"${total_caja:,.2f}",
+                                delta=f"Liquidez Total"
+                            )
+                            st.divider()
+
                             st.metric(
                                 "💵 Efectivo Físico", f"${efectivo_total:,.2f}"
                             )
