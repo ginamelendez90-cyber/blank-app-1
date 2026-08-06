@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, date
+[cite: 3]from datetime import datetime, timedelta, date
 import re
 import urllib.parse
 import uuid
@@ -286,7 +286,7 @@ modo_vista = st.sidebar.radio(
 
 
 # ==========================================
-# VENTANA EMERGENTE (MODAL) DE DETALLE DE GASTOS
+# VENTANAS EMERGENTES (MODALES) DE DETALLE
 # ==========================================
 @st.dialog("📋 Detalle de Gastos Operativos del Mes")
 def mostrar_detalle_gastos(df_gastos_mes):
@@ -308,6 +308,29 @@ def mostrar_detalle_gastos(df_gastos_mes):
         st.info(f"💰 **Total en Gastos del Mes:** ${df_gastos_mes['Cargo'].sum():,.2f}")
     else:
         st.info("💡 No hay registros de gastos para este mes.")
+
+
+@st.dialog("📋 Detalle de Capital Prestado del Mes")
+def mostrar_detalle_prestamos(df_prestamos_mes):
+    st.write("A continuación se muestra el desglose de los préstamos otorgados a los clientes en este mes:")
+    if not df_prestamos_mes.empty:
+        df_pres = df_prestamos_mes[["Fecha", "Codigo", "Nombre", "Concepto", "Cargo"]].copy()
+        df_pres["Fecha"] = pd.to_datetime(df_pres["Fecha"]).dt.strftime("%Y-%m-%d")
+        st.dataframe(
+            df_pres,
+            column_config={
+                "Fecha": st.column_config.TextColumn("Fecha"),
+                "Codigo": st.column_config.TextColumn("Código"),
+                "Nombre": st.column_config.TextColumn("Cliente"),
+                "Concepto": st.column_config.TextColumn("Concepto / Plazo"),
+                "Cargo": st.column_config.NumberColumn("Monto Prestado ($)", format="$%.2f"),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.info(f"💸 **Total Prestado en el Mes:** ${df_prestamos_mes['Cargo'].sum():,.2f}")
+    else:
+        st.info("💡 No hay registros de préstamos para este mes.")
 
 
 # ==========================================
@@ -1975,14 +1998,21 @@ else:
                     df_clientes_mes = df_mes[
                         ~df_mes["Codigo"].str.contains("CUENTA_|GASTO_|CAJA_|PASIVO_EXT", na=False)
                     ]
-                    prestado_mes = df_clientes_mes[
+                    
+                    df_prestamos_mes = df_clientes_mes[
                         ~df_clientes_mes["Concepto"].str.contains("Interés aplicado", case=False, na=False)
-                    ]["Cargo"].sum()
+                    ]
+                    prestado_mes = df_prestamos_mes["Cargo"].sum()
 
                     ganancia_neta = intereses_mes - gastos_mes
 
                     m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("💸 Capital Prestado", f"${prestado_mes:,.2f}")
+                    
+                    with m1:
+                        st.metric("💸 Capital Prestado", f"${prestado_mes:,.2f}")
+                        if st.button("🔍 Ver Quiénes", key="btn_ver_prestamos_modal", use_container_width=True):
+                            mostrar_detalle_prestamos(df_prestamos_mes)
+
                     m2.metric("📈 Intereses Generados", f"${intereses_mes:,.2f}")
 
                     with m3:
