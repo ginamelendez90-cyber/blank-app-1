@@ -1244,8 +1244,6 @@ else:
                         ascending=False
                     )
 
-                    hoy_str = datetime.now().strftime("%Y-%m-%d")
-                    
                     fecha_seleccionada_jornada = st.date_input(
                         "Selecciona la fecha para ver la jornada o historial:",
                         value=datetime.now().date(),
@@ -1949,7 +1947,7 @@ else:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 8. GASTOS OPERATIVOS (ACTUALIZADO CON DOBLE REGISTRO)
+        # 8. GASTOS OPERATIVOS
         # ------------------------------------------
         elif seccion_admin == "📉 Gastos Operativos":
             with st.container(border=True):
@@ -1957,19 +1955,17 @@ else:
                 with st.form("form_gastos_op"):
                     fga = st.date_input("Fecha", datetime.now())
                     cga = st.selectbox(
-                        "Pagado con / ¿De qué cuenta sale?:", ["Efectivo", "Pago Móvil", "Binance"]
+                        "Pagado con:", ["Efectivo", "Pago Móvil", "Binance"]
                     )
                     dga = st.text_input("Detalle del Gasto")
                     mga = st.number_input("Monto USD ($)", min_value=0.01)
 
                     if st.form_submit_button(
-                        "💾 Guardar Gasto y Rebajar de Caja", use_container_width=True
+                        "Guardar Gasto", use_container_width=True
                     ):
-                        if dga and mga > 0:
+                        if dga:
                             try:
                                 sheet = obtener_hoja()
-                                
-                                # 1. Registro del gasto operativo en el sistema
                                 sheet.append_row(
                                     [
                                         fga.strftime("%Y-%m-%d"),
@@ -1980,24 +1976,12 @@ else:
                                         0.0,
                                     ]
                                 )
-                                
-                                # 2. Descuento automático (Cargo) en la cuenta seleccionada para sumar/restar en caja
-                                sheet.append_row(
-                                    [
-                                        fga.strftime("%Y-%m-%d"),
-                                        f"CUENTA_{cga.upper()}",
-                                        f"Ajuste por Gasto",
-                                        f"Rebaja de saldo por gasto: {dga}",
-                                        float(mga),
-                                        0.0,
-                                    ]
-                                )
-                                
                                 st.cache_data.clear()
-                                st.toast(f"✅ Gasto de ${mga} registrado y rebajado de {cga}", icon="📉")
+
+                                st.toast("✅ Gasto registrado", icon="📉")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error al registrar gasto: {e}")
+                                st.error(f"Error: {e}")
 
         # ------------------------------------------
         # 9. LIQUIDAR CRÉDITO
