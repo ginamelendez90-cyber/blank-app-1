@@ -345,15 +345,12 @@ def mostrar_detalle_prestamos(df_prestamos_mes):
 def mostrar_detalle_abonos_cliente(codigo_cliente, nombre_cliente, df_completo):
     st.subheader(f"Abonos del Crédito Vigente: {nombre_cliente} (`{codigo_cliente}`)")
     
-    # Filtrar movimientos del cliente
     df_cli = df_completo[df_completo["Codigo"].astype(str).str.strip().str.upper() == str(codigo_cliente).strip().upper()].copy()
     
     if not df_cli.empty:
-        # Identificar si es cliente en Bs
         es_cliente_bs = str(codigo_cliente).strip().upper() in lista_clientes_bs
         moneda_label = "Bs." if es_cliente_bs else "$"
         
-        # Aislar únicamente el crédito activo (descartando los ciclos liquidados anteriores)
         indices_liq = df_cli[
             df_cli["Concepto"].str.contains("Crédito anterior liquidado", case=False, na=False)
         ].index
@@ -465,7 +462,6 @@ if modo_vista == "👤 Portal del Cliente":
                 if not resultado.empty:
                     nombre = resultado.iloc[0]["Nombre"]
 
-                    # EVALUACIÓN DE MONEDA PARA ESTE CLIENTE
                     es_cliente_bs = cod_clean in lista_clientes_bs
                     moneda_label = "Bs." if es_cliente_bs else "$"
 
@@ -514,9 +510,6 @@ if modo_vista == "👤 Portal del Cliente":
                     else:
                         prestamo_vis, pagos_vis, saldo_vis = 0.0, 0.0, 0.0
 
-                    # ----------------------------------------------------
-                    # LÓGICA DE ESTATUS: AL DÍA VS ATRASADO (1 DÍA DE GRACIA)
-                    # ----------------------------------------------------
                     estado_cliente = "🟢 AL DÍA"
                     detalle_estatus = "Su crédito está al día."
                     color_estatus = "success"
@@ -1251,7 +1244,6 @@ else:
                         ascending=False
                     )
 
-                    # Integración de selector de fecha para ver jornada actual o historial de días pasados
                     hoy_str = datetime.now().strftime("%Y-%m-%d")
                     
                     fecha_seleccionada_jornada = st.date_input(
@@ -1388,10 +1380,8 @@ else:
                     st.divider()
                     st.subheader("👥 Cartera de Clientes y Enlaces Directos")
                     
-                    # Asegurar filas únicas por código de cliente para evitar claves duplicadas
                     resumen_clientes_unicos = resumen_clientes.drop_duplicates(subset=["Codigo"]).reset_index(drop=True)
 
-                    # Interfaz de tabla con botón/ventana emergente de abonos para cada cliente
                     for idx, row_cli in resumen_clientes_unicos.iterrows():
                         with st.container(border=True):
                             cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([1.2, 2, 1.2, 1.2, 1.2, 1.5])
@@ -1402,7 +1392,6 @@ else:
                             cc5.metric("Saldo", f"${row_cli['Saldo_Pendiente']:,.2f}")
                             
                             with cc6:
-                                # Botón con key única asegurada por índice y código
                                 if st.button("📋 Ver Abonos", key=f"btn_abonos_{row_cli['Codigo']}_{idx}", use_container_width=True):
                                     mostrar_detalle_abonos_cliente(row_cli['Codigo'], row_cli['Nombre'], df_existente)
                                 
@@ -1960,7 +1949,7 @@ else:
                                 st.error(f"Error: {e}")
 
         # ------------------------------------------
-        # 8. GASTOS OPERATIVOS
+        # 8. GASTOS OPERATIVOS (ACTUALIZADO CON DOBLE REGISTRO)
         # ------------------------------------------
         elif seccion_admin == "📉 Gastos Operativos":
             with st.container(border=True):
@@ -1968,17 +1957,19 @@ else:
                 with st.form("form_gastos_op"):
                     fga = st.date_input("Fecha", datetime.now())
                     cga = st.selectbox(
-                        "Pagado con:", ["Efectivo", "Pago Móvil", "Binance"]
+                        "Pagado con / ¿De qué cuenta sale?:", ["Efectivo", "Pago Móvil", "Binance"]
                     )
                     dga = st.text_input("Detalle del Gasto")
                     mga = st.number_input("Monto USD ($)", min_value=0.01)
 
                     if st.form_submit_button(
-                        "Guardar Gasto", use_container_width=True
+                        "💾 Guardar Gasto y Rebajar de Caja", use_container_width=True
                     ):
-                        if dga:
+                        if dga and mga > 0:
                             try:
                                 sheet = obtener_hoja()
+                                
+                                # 1. Registro del gasto operativo en el sistema
                                 sheet.append_row(
                                     [
                                         fga.strftime("%Y-%m-%d"),
@@ -1989,12 +1980,24 @@ else:
                                         0.0,
                                     ]
                                 )
+                                
+                                # 2. Descuento automático (Cargo) en la cuenta seleccionada para sumar/restar en caja
+                                sheet.append_row(
+                                    [
+                                        fga.strftime("%Y-%m-%d"),
+                                        f"CUENTA_{cga.upper()}",
+                                        f"Ajuste por Gasto",
+                                        f"Rebaja de saldo por gasto: {dga}",
+                                        float(mga),
+                                        0.0,
+                                    ]
+                                )
+                                
                                 st.cache_data.clear()
-
-                                st.toast("✅ Gasto registrado", icon="📉")
+                                st.toast(f"✅ Gasto de ${mga} registrado y rebajado de {cga}", icon="📉")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error: {e}")
+                                st.error(f"Error al registrar gasto: {e}")
 
         # ------------------------------------------
         # 9. LIQUIDAR CRÉDITO
