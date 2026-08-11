@@ -333,11 +333,11 @@ def mostrar_detalle_prestamos(df_prestamos_mes):
         st.info("💡 No hay registros de préstamos para este mes.")
 
 
-@st.dialog("📋 Historial de Abonos del Cliente")
+@st.dialog("📋 Detalle de Abonos del Crédito Activo")
 def mostrar_detalle_abonos_cliente(codigo_cliente, nombre_cliente, df_completo):
-    st.subheader(f"Historial de Abonos: {nombre_cliente} (`{codigo_cliente}`)")
+    st.subheader(f"Abonos del Crédito Vigente: {nombre_cliente} (`{codigo_cliente}`)")
     
-    # Filtrar movimientos del cliente donde haya abono (Abono > 0)
+    # Filtrar movimientos del cliente
     df_cli = df_completo[df_completo["Codigo"].astype(str).str.strip().str.upper() == str(codigo_cliente).strip().upper()].copy()
     
     if not df_cli.empty:
@@ -345,6 +345,17 @@ def mostrar_detalle_abonos_cliente(codigo_cliente, nombre_cliente, df_completo):
         es_cliente_bs = str(codigo_cliente).strip().upper() in lista_clientes_bs
         moneda_label = "Bs." if es_cliente_bs else "$"
         
+        # Aislar únicamente el crédito activo (descartando los ciclos liquidados anteriores)
+        indices_liq = df_cli[
+            df_cli["Concepto"].str.contains("Crédito anterior liquidado", case=False, na=False)
+        ].index
+
+        if not indices_liq.empty:
+            ult_idx = indices_liq[-1]
+            mov_actuales = df_cli.loc[df_cli.index > ult_idx].copy()
+        else:
+            mov_actuales = df_cli.copy()
+
         def calcular_abono_vista(row):
             abono = float(row["Abono"])
             concepto = str(row["Concepto"])
@@ -353,23 +364,26 @@ def mostrar_detalle_abonos_cliente(codigo_cliente, nombre_cliente, df_completo):
                 return round(abono * tasa_registro, 2)
             return abono
 
-        df_cli["Abono_Vis"] = df_cli.apply(calcular_abono_vista, axis=1)
-        df_abonos = df_cli[df_cli["Abono_Vis"] > 0][["Fecha", "Concepto", "Abono_Vis"]].copy()
-        
-        if not df_abonos.empty:
-            st.dataframe(
-                df_abonos,
-                column_config={
-                    "Fecha": st.column_config.TextColumn("Fecha"),
-                    "Concepto": st.column_config.TextColumn("Detalle / Referencia"),
-                    "Abono_Vis": st.column_config.NumberColumn(f"Abono ({moneda_label})", format=f"{moneda_label} %.2f"),
-                },
-                use_container_width=True,
-                hide_index=True,
-            )
-            st.success(f"💵 **Total Abonado Histórico:** {moneda_label} {df_abonos['Abono_Vis'].sum():,.2f}")
+        if not mov_actuales.empty:
+            mov_actuales["Abono_Vis"] = mov_actuales.apply(calcular_abono_vista, axis=1)
+            df_abonos_vigentes = mov_actuales[mov_actuales["Abono_Vis"] > 0][["Fecha", "Concepto", "Abono_Vis"]].copy()
+            
+            if not df_abonos_vigentes.empty:
+                st.dataframe(
+                    df_abonos_vigentes,
+                    column_config={
+                        "Fecha": st.column_config.TextColumn("Fecha"),
+                        "Concepto": st.column_config.TextColumn("Detalle / Referencia"),
+                        "Abono_Vis": st.column_config.NumberColumn(f"Abono ({moneda_label})", format=f"{moneda_label} %.2f"),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.success(f"💵 **Total Abonado en el Crédito Vigente:** {moneda_label} {df_abonos_vigentes['Abono_Vis'].sum():,.2f}")
+            else:
+                st.info("💡 Este cliente aún no registra abonos para su crédito activo actual.")
         else:
-            st.info("💡 Este cliente aún no registra abonos en el sistema.")
+            st.info("💡 No se encontraron movimientos vigentes para este cliente.")
     else:
         st.info("💡 No se encontraron registros para este cliente.")
 
@@ -1366,8 +1380,11 @@ else:
                     st.divider()
                     st.subheader("👥 Cartera de Clientes y Enlaces Directos")
                     
+                    # Asegurar filas únicas por código de cliente para evitar claves duplicadas
+                    resumen_clientes_unicos = resumen_clientes.drop_duplicates(subset=["Codigo"]).reset_index(drop=True)
+
                     # Interfaz de tabla con botón/ventana emergente de abonos para cada cliente
-                    for idx, row_cli in resumen_clientes.iterrows():
+                    for idx, row_cli in resumen_clientes_unicos.iterrows():
                         with st.container(border=True):
                             cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([1.2, 2, 1.2, 1.2, 1.2, 1.5])
                             cc1.markdown(f"**`{row_cli['Codigo']}`**")
@@ -1377,8 +1394,8 @@ else:
                             cc5.metric("Saldo", f"${row_cli['Saldo_Pendiente']:,.2f}")
                             
                             with cc6:
-                                # Botón para activar la ventana emergente de abonos de este cliente específico
-                                if st.button("📋 Ver Abonos", key=f"btn_abonos_{row_cli['Codigo']}", use_container_width=True):
+                                # Botón con key única asegurada por índice y código
+                                if st.button("📋 Ver Abonos", key=f"btn_abonos_{row_cli['Codigo']}_{idx}", use_container_width=True):
                                     mostrar_detalle_abonos_cliente(row_cli['Codigo'], row_cli['Nombre'], df_existente)
                                 
                                 st.markdown(
