@@ -316,19 +316,21 @@ def mostrar_detalle_prestamos(df_prestamos_mes):
     if not df_prestamos_mes.empty:
         df_pres = df_prestamos_mes[["Fecha", "Codigo", "Nombre", "Concepto", "Cargo"]].copy()
         df_pres["Fecha"] = pd.to_datetime(df_pres["Fecha"]).dt.strftime("%Y-%m-%d")
-        st.dataframe(
-            df_pres,
-            column_config={
-                "Fecha": st.column_config.TextColumn("Fecha"),
-                "Codigo": st.column_config.TextColumn("Código"),
-                "Nombre": st.column_config.TextColumn("Cliente"),
-                "Concepto": st.column_config.TextColumn("Concepto / Plazo"),
-                "Cargo": st.column_config.NumberColumn("Monto Prestado ($)", format="$%.2f"),
-            },
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.info(f"💸 **Total Prestado en el Mes:** ${df_prestamos_mes['Cargo'].sum():,.2f}")
+        
+        for _, row in df_pres.iterrows():
+            f_str = row["Fecha"]
+            cod = row["Codigo"]
+            nom = row["Nombre"]
+            conc = row["Concepto"]
+            carg = row["Cargo"]
+            
+            st.markdown(
+                f"- 📅 **{f_str}** | 👤 **`{cod}` {nom}** | 📝 *{conc}* | <span style='color: #28a745; font-weight: bold;'>${carg:,.2f} USD (Prestado)</span>",
+                unsafe_allow_html=True
+            )
+            
+        st.divider()
+        st.success(f"💸 **Total Prestado en el Mes:** ${df_prestamos_mes['Cargo'].sum():,.2f}")
     else:
         st.info("💡 No hay registros de préstamos para este mes.")
 
