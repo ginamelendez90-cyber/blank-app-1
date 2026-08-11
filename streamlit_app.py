@@ -333,6 +333,47 @@ def mostrar_detalle_prestamos(df_prestamos_mes):
         st.info("💡 No hay registros de préstamos para este mes.")
 
 
+@st.dialog("📋 Historial de Abonos del Cliente")
+def mostrar_detalle_abonos_cliente(codigo_cliente, nombre_cliente, df_completo):
+    st.subheader(f"Historial de Abonos: {nombre_cliente} (`{codigo_cliente}`)")
+    
+    # Filtrar movimientos del cliente donde haya abono (Abono > 0)
+    df_cli = df_completo[df_completo["Codigo"].astype(str).str.strip().str.upper() == str(codigo_cliente).strip().upper()].copy()
+    
+    if not df_cli.empty:
+        # Identificar si es cliente en Bs
+        es_cliente_bs = str(codigo_cliente).strip().upper() in lista_clientes_bs
+        moneda_label = "Bs." if es_cliente_bs else "$"
+        
+        def calcular_abono_vista(row):
+            abono = float(row["Abono"])
+            concepto = str(row["Concepto"])
+            if es_cliente_bs:
+                tasa_registro = obtener_tasa_concepto(concepto, tasa_bs_usd)
+                return round(abono * tasa_registro, 2)
+            return abono
+
+        df_cli["Abono_Vis"] = df_cli.apply(calcular_abono_vista, axis=1)
+        df_abonos = df_cli[df_cli["Abono_Vis"] > 0][["Fecha", "Concepto", "Abono_Vis"]].copy()
+        
+        if not df_abonos.empty:
+            st.dataframe(
+                df_abonos,
+                column_config={
+                    "Fecha": st.column_config.TextColumn("Fecha"),
+                    "Concepto": st.column_config.TextColumn("Detalle / Referencia"),
+                    "Abono_Vis": st.column_config.NumberColumn(f"Abono ({moneda_label})", format=f"{moneda_label} %.2f"),
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.success(f"💵 **Total Abonado Histórico:** {moneda_label} {df_abonos['Abono_Vis'].sum():,.2f}")
+        else:
+            st.info("💡 Este cliente aún no registra abonos en el sistema.")
+    else:
+        st.info("💡 No se encontraron registros para este cliente.")
+
+
 # ==========================================
 # PESTAÑA 1: PORTAL DEL CLIENTE
 # ==========================================
@@ -1324,29 +1365,30 @@ else:
 
                     st.divider()
                     st.subheader("👥 Cartera de Clientes y Enlaces Directos")
-                    st.dataframe(
-                        resumen_clientes[
-                            [
-                                "Codigo",
-                                "Nombre",
-                                "Total_Cargos",
-                                "Total_Abonos",
-                                "Saldo_Pendiente",
-                                "Enlace_Reporte",
-                            ]
-                        ],
-                        column_config={
-                            "Total_Cargos": st.column_config.NumberColumn("Cargos ($)", format="$%.2f"),
-                            "Total_Abonos": st.column_config.NumberColumn("Abonos ($)", format="$%.2f"),
-                            "Saldo_Pendiente": st.column_config.NumberColumn("Saldo ($)", format="$%.2f"),
-                            "Enlace_Reporte": st.column_config.LinkColumn(
-                                "Link de Reporte Pago",
-                                display_text="Copiar Link 🔗",
-                            ),
-                        },
-                        use_container_width=True,
-                        hide_index=True,
-                    )
+                    
+                    # Interfaz de tabla con botón/ventana emergente de abonos para cada cliente
+                    for idx, row_cli in resumen_clientes.iterrows():
+                        with st.container(border=True):
+                            cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([1.2, 2, 1.2, 1.2, 1.2, 1.5])
+                            cc1.markdown(f"**`{row_cli['Codigo']}`**")
+                            cc2.markdown(f"👤 {row_cli['Nombre']}")
+                            cc3.metric("Cargos", f"${row_cli['Total_Cargos']:,.2f}")
+                            cc4.metric("Abonos", f"${row_cli['Total_Abonos']:,.2f}")
+                            cc5.metric("Saldo", f"${row_cli['Saldo_Pendiente']:,.2f}")
+                            
+                            with cc6:
+                                # Botón para activar la ventana emergente de abonos de este cliente específico
+                                if st.button("📋 Ver Abonos", key=f"btn_abonos_{row_cli['Codigo']}", use_container_width=True):
+                                    mostrar_detalle_abonos_cliente(row_cli['Codigo'], row_cli['Nombre'], df_existente)
+                                
+                                st.markdown(
+                                    f"""<a href="{row_cli['Enlace_Reporte']}" target="_blank" style="text-decoration: none;">
+                                        <div style="background-color: #2e3440; color: white; padding: 6px; text-align: center; font-size: 12px; border-radius: 4px; margin-top: 4px;">
+                                            Copiar Link 🔗
+                                        </div>
+                                    </a>""",
+                                    unsafe_allow_html=True
+                                )
             except Exception as e:
                 st.error(f"Error al calcular flujo de caja: {e}")
 
