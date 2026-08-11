@@ -314,21 +314,29 @@ def mostrar_detalle_gastos(df_gastos_mes):
 def mostrar_detalle_prestamos(df_prestamos_mes):
     st.write("A continuación se muestra el desglose de los préstamos otorgados a los clientes en este mes:")
     if not df_prestamos_mes.empty:
-        df_pres = df_prestamos_mes[["Fecha", "Codigo", "Nombre", "Concepto", "Cargo"]].copy()
-        df_pres["Fecha"] = pd.to_datetime(df_pres["Fecha"]).dt.strftime("%Y-%m-%d")
-        st.dataframe(
-            df_pres,
-            column_config={
-                "Fecha": st.column_config.TextColumn("Fecha"),
-                "Codigo": st.column_config.TextColumn("Código"),
-                "Nombre": st.column_config.TextColumn("Cliente"),
-                "Concepto": st.column_config.TextColumn("Concepto / Plazo"),
-                "Cargo": st.column_config.NumberColumn("Monto Prestado ($)", format="$%.2f"),
-            },
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.info(f"💸 **Total Prestado en el Mes:** ${df_prestamos_mes['Cargo'].sum():,.2f}")
+        df_solo_prestamos = df_prestamos_mes[
+            (df_prestamos_mes["Cargo"] > 0) & 
+            (~df_prestamos_mes["Concepto"].str.contains("Interés aplicado|Abono|Devolución|Transferencia", case=False, na=False))
+        ].copy()
+
+        if not df_solo_prestamos.empty:
+            df_pres = df_solo_prestamos[["Fecha", "Codigo", "Nombre", "Concepto", "Cargo"]].copy()
+            df_pres["Fecha"] = pd.to_datetime(df_pres["Fecha"]).dt.strftime("%Y-%m-%d")
+            st.dataframe(
+                df_pres,
+                column_config={
+                    "Fecha": st.column_config.TextColumn("Fecha"),
+                    "Codigo": st.column_config.TextColumn("Código"),
+                    "Nombre": st.column_config.TextColumn("Cliente"),
+                    "Concepto": st.column_config.TextColumn("Concepto / Plazo"),
+                    "Cargo": st.column_config.NumberColumn("Monto Prestado ($)", format="$%.2f"),
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.info(f"💸 **Total Prestado en el Mes:** ${df_solo_prestamos['Cargo'].sum():,.2f}")
+        else:
+            st.info("💡 No hay registros de capital prestado para este mes.")
     else:
         st.info("💡 No hay registros de préstamos para este mes.")
 
