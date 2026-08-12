@@ -1068,7 +1068,7 @@ else:
 
                         st.divider()
 
-                        for atr in lista_atrasados:
+                        for i, atr in enumerate(lista_atrasados):
                             with st.container(border=True):
                                 col_a1, col_a2, col_a3, col_a4 = st.columns([2, 2, 2, 2])
 
@@ -1081,25 +1081,37 @@ else:
                                 col_a3.markdown(f"⚠️ **Monto Atrasado:**\n**{atr['Símbolo']} {atr['Monto Atraso']:,.2f}**")
                                 col_a3.caption(f"Saldo pendiente total: {atr['Símbolo']} {atr['Saldo Pendiente']:,.2f}")
 
-                                link_cobro_wa = f"https://wa.me/?text={atr['WhatsApp_Msg']}"
-                                col_a4.markdown(
-                                    f"""
-                                    <a href="{link_cobro_wa}" target="_blank" style="text-decoration: none;">
-                                        <div style="
-                                            background-color: #DC3545;
-                                            color: white;
-                                            padding: 10px;
-                                            text-align: center;
-                                            font-weight: bold;
-                                            font-size: 13px;
-                                            border-radius: 6px;
-                                            margin-top: 5px;">
-                                            📲 Recordar Cobro
-                                        </div>
-                                    </a>
-                                    """,
-                                    unsafe_allow_html=True
-                                )
+                                with col_a4:
+                                    telf_input = st.text_input(
+                                        "Teléfono (Ej. 58412...)",
+                                        value="",
+                                        placeholder="58412...",
+                                        key=f"telf_atr_{atr['Código']}_{i}"
+                                    )
+                                    
+                                    if telf_input.strip():
+                                        link_cobro_wa = f"https://wa.me/{telf_input.strip()}?text={atr['WhatsApp_Msg']}"
+                                    else:
+                                        link_cobro_wa = f"https://wa.me/?text={atr['WhatsApp_Msg']}"
+
+                                    st.markdown(
+                                        f"""
+                                        <a href="{link_cobro_wa}" target="_blank" style="text-decoration: none;">
+                                            <div style="
+                                                background-color: #DC3545;
+                                                color: white;
+                                                padding: 10px;
+                                                text-align: center;
+                                                font-weight: bold;
+                                                font-size: 13px;
+                                                border-radius: 6px;
+                                                margin-top: 5px;">
+                                                📲 Recordar Cobro
+                                            </div>
+                                        </a>
+                                        """,
+                                        unsafe_allow_html=True
+                                    )
                     else:
                         st.success("🎉 ¡Excelente! No hay clientes con retraso de pago actualmente (considerando el día de gracia).")
             except Exception as e:
