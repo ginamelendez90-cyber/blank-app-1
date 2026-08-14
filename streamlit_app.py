@@ -18,12 +18,10 @@ def verificar_actualizacion_medianoche():
     ahora = datetime.now()
     hoy_str = ahora.strftime("%Y-%m-%d")
     
-    # Control mediante session_state para ejecutar solo una vez al cambiar de día
     if "ultima_fecha_verificacion" not in st.session_state:
         st.session_state["ultima_fecha_verificacion"] = hoy_str
     
     if st.session_state["ultima_fecha_verificacion"] != hoy_str:
-        # ---- AQUÍ COLUCAS LA LÓGICA QUE QUIERAS QUE SE EJECUTE A LAS 12 AM ----
         st.toast(f"🔄 Se detectó el cambio de día a las 12:00 AM. Actualizando sistema...", icon="🕛")
         st.session_state["ultima_fecha_verificacion"] = hoy_str
         st.cache_data.clear()
@@ -79,7 +77,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Ejecutar control de actualización a las 12 AM al cargar la app
 verificar_actualizacion_medianoche()
 
 st.markdown(
@@ -113,7 +110,6 @@ def obtener_cliente_gspread():
     creds_dict = dict(st.secrets["connections"]["gsheets"])
     creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
     return gspread.authorize(creds)
-
 
 def obtener_hoja(nombre_hoja="Sheet1"):
     client = obtener_cliente_gspread()
@@ -159,9 +155,7 @@ def obtener_hoja(nombre_hoja="Sheet1"):
         except Exception:
             return sh.get_worksheet(0)
 
-
 def cargar_configuracion_persistente():
-    """Lee la tasa y los códigos guardados en la hoja CONFIGURACION."""
     try:
         ws = obtener_hoja("CONFIGURACION")
         records = ws.get_all_records()
@@ -173,9 +167,7 @@ def cargar_configuracion_persistente():
     except Exception:
         return 65.0, "CLI-001, CLI-002"
 
-
 def guardar_configuracion_persistente(nueva_tasa, nuevos_codigos):
-    """Guarda permanentemente la tasa y los códigos en Google Sheets."""
     try:
         ws = obtener_hoja("CONFIGURACION")
         ws.update_cell(2, 2, str(nueva_tasa))
@@ -186,16 +178,13 @@ def guardar_configuracion_persistente(nueva_tasa, nuevos_codigos):
         st.error(f"Error al guardar configuración: {e}")
         return False
 
-
 def registrar_codigo_bs_si_no_existe(codigo, lista_actual_str, tasa_actual):
-    """Asegura que un cliente en Bs quede registrado automáticamente en la lista general."""
     cod_clean = str(codigo).strip().upper()
     lista_cods = [c.strip().upper() for c in lista_actual_str.split(",") if c.strip()]
     if cod_clean not in lista_cods:
         lista_cods.append(cod_clean)
         nueva_str = ", ".join(lista_cods)
         guardar_configuracion_persistente(tasa_actual, nueva_str)
-
 
 def calcular_saldo_cuenta(df, cuenta_nombre):
     if df.empty:
@@ -237,15 +226,10 @@ def calcular_saldo_cuenta(df, cuenta_nombre):
     df_cuenta = df_clean[cond_codigo | cond_concepto]
     return float(df_cuenta["Abono"].sum() - df_cuenta["Cargo"].sum())
 
-
-# ==========================================
-# CARGAR CONFIGURACIÓN DESDE GOOGLE SHEETS
-# ==========================================
 tasa_bs_usd, codigos_bs_str = cargar_configuracion_persistente()
 lista_clientes_bs = [
     c.strip().upper() for c in codigos_bs_str.split(",") if c.strip()
 ]
-
 
 # ==========================================
 # BARRA LATERAL (AUTENTICACIÓN Y NAVEGACIÓN)
@@ -302,7 +286,6 @@ modo_vista = st.sidebar.radio(
     index=0,
 )
 
-
 # ==========================================
 # VENTANAS EMERGENTES (MODALES) DE DETALLE
 # ==========================================
@@ -326,7 +309,6 @@ def mostrar_detalle_gastos(df_gastos_mes):
         st.info(f"💰 **Total en Gastos del Mes:** ${df_gastos_mes['Cargo'].sum():,.2f}")
     else:
         st.info("💡 No hay registros de gastos para este mes.")
-
 
 @st.dialog("📋 Detalle de Capital Prestado del Mes")
 def mostrar_detalle_prestamos(df_prestamos_mes):
@@ -357,7 +339,6 @@ def mostrar_detalle_prestamos(df_prestamos_mes):
             st.info("💡 No hay registros de capital prestado para este mes.")
     else:
         st.info("💡 No hay registros de préstamos para este mes.")
-
 
 @st.dialog("📋 Detalle de Abonos del Crédito Activo")
 def mostrar_detalle_abonos_cliente(codigo_cliente, nombre_cliente, df_completo):
@@ -739,7 +720,6 @@ if modo_vista == "👥 Portal del Cliente":
                         f"👤 *Cliente:* {nombre_clean} ({codigo_final})\n"
                         f"💵 *Monto:* {'Bs. ' + f'{monto_reportado:,.2f}' if ('Bolívares' in moneda_pago) else '$' + f'{monto_reportado:,.2f}'}\n"
                         f"💱 *Equivalente en Sistema:* ${monto_usd_convertido:,.2f} USD\n"
-                        f"📉 *Saldo Pendiente:* ${saldo_pendiente:,.2f} USD\n"
                         f"🏦 *Medio:* {cuenta_destino}\n"
                         f"🔢 *Referencia:* {ref_clean}\n"
                         f"📅 *Fecha:* {fecha_str}"
