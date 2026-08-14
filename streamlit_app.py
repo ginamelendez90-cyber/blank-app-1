@@ -1125,7 +1125,7 @@ else:
                                                 font-size: 13px;
                                                 border-radius: 6px;
                                                 margin-top: 5px;">
-                                                📲 Recordار Cobro
+                                                📲 Recordar Cobro
                                             </div>
                                         </a>
                                         """,
@@ -2022,7 +2022,7 @@ else:
                 st.subheader("✂️ Cerrar Ciclo de Crédito")
                 if opciones_clientes:
                     cli_liq = st.selectbox(
-                        "Cliente a Liquidار:", opciones_clientes
+                        "Cliente a Liquidar:", opciones_clientes
                     )
                     cod_liq = cli_liq.split(" - ")[0]
                     nom_liq = cli_liq.split(" - ")[1]
@@ -2110,3 +2110,4 @@ else:
                         f"${ganancia_neta:,.2f}",
                         delta=f"${ganancia_neta:,.2f}",
                     )
+```[cite: 4]
