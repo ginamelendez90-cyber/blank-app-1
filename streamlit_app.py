@@ -2110,4 +2110,3 @@ else:
                         f"${ganancia_neta:,.2f}",
                         delta=f"${ganancia_neta:,.2f}",
                     )
-```[cite: 4]
