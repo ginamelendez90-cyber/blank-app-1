@@ -739,6 +739,7 @@ if modo_vista == "👥 Portal del Cliente":
                         f"👤 *Cliente:* {nombre_clean} ({codigo_final})\n"
                         f"💵 *Monto:* {'Bs. ' + f'{monto_reportado:,.2f}' if ('Bolívares' in moneda_pago) else '$' + f'{monto_reportado:,.2f}'}\n"
                         f"💱 *Equivalente en Sistema:* ${monto_usd_convertido:,.2f} USD\n"
+                        f"📉 *Saldo Pendiente:* ${saldo_pendiente:,.2f} USD\n"
                         f"🏦 *Medio:* {cuenta_destino}\n"
                         f"🔢 *Referencia:* {ref_clean}\n"
                         f"📅 *Fecha:* {fecha_str}"
