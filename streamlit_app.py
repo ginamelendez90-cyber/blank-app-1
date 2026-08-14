@@ -74,7 +74,7 @@ def obtener_tasa_concepto(concepto_str, tasa_defecto):
 
 st.set_page_config(
     page_title="Sistema de Cobros & Finanzas",
-    page_icon="💳",
+    page_icon="💹",
     layout="wide",
     initial_sidebar_state="expanded",
 )
