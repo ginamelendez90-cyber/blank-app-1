@@ -13,6 +13,21 @@ from streamlit_gsheets import GSheetsConnection
 # ==========================================
 TELEFONO_ADMIN = "584123801615"
 
+def verificar_actualizacion_medianoche():
+    """Verifica si ha cruzado las 12:00 AM para ejecutar procesos o limpieza diaria."""
+    ahora = datetime.now()
+    hoy_str = ahora.strftime("%Y-%m-%d")
+    
+    # Control mediante session_state para ejecutar solo una vez al cambiar de día
+    if "ultima_fecha_verificacion" not in st.session_state:
+        st.session_state["ultima_fecha_verificacion"] = hoy_str
+    
+    if st.session_state["ultima_fecha_verificacion"] != hoy_str:
+        # ---- AQUÍ COLUCAS LA LÓGICA QUE QUIERAS QUE SE EJECUTE A LAS 12 AM ----
+        st.toast(f"🔄 Se detectó el cambio de día a las 12:00 AM. Actualizando sistema...", icon="🕛")
+        st.session_state["ultima_fecha_verificacion"] = hoy_str
+        st.cache_data.clear()
+
 def es_dia_cobro(fecha_obj):
     """Devuelve False si es Domingo o Feriado Nacional."""
     if fecha_obj.weekday() == 6:  # 6 = Domingo
@@ -63,6 +78,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Ejecutar control de actualización a las 12 AM al cargar la app
+verificar_actualizacion_medianoche()
 
 st.markdown(
     """
@@ -1106,7 +1124,7 @@ else:
                                                 font-size: 13px;
                                                 border-radius: 6px;
                                                 margin-top: 5px;">
-                                                📲 Recordar Cobro
+                                                📲 Recordار Cobro
                                             </div>
                                         </a>
                                         """,
@@ -2003,7 +2021,7 @@ else:
                 st.subheader("✂️ Cerrar Ciclo de Crédito")
                 if opciones_clientes:
                     cli_liq = st.selectbox(
-                        "Cliente a Liquidar:", opciones_clientes
+                        "Cliente a Liquidار:", opciones_clientes
                     )
                     cod_liq = cli_liq.split(" - ")[0]
                     nom_liq = cli_liq.split(" - ")[1]
