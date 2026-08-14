@@ -298,7 +298,7 @@ st.sidebar.divider()
 
 modo_vista = st.sidebar.radio(
     "Navegación Principal:",
-    ["👤 Portal del Cliente", "💼 Panel de Administrador"],
+    ["👥 Portal del Cliente", "💼 Panel de Administrador"],
     index=0,
 )
 
@@ -414,8 +414,8 @@ def mostrar_detalle_abonos_cliente(codigo_cliente, nombre_cliente, df_completo):
 # ==========================================
 # PESTAÑA 1: PORTAL DEL CLIENTE
 # ==========================================
-if modo_vista == "👤 Portal del Cliente":
-    st.title("👤 Portal de Atención al Cliente")
+if modo_vista == "👥 Portal del Cliente":
+    st.title("👥 Portal de Atención al Cliente")
 
     query_params = st.query_params
     codigo_url = query_params.get("cliente", "").strip().upper()
