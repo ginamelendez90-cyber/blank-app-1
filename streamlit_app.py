@@ -91,6 +91,13 @@ st.markdown(
     div[data-testid="stSidebarNav"] {
         padding-top: 10px;
     }
+    /* Estilos visuales optimizados para formularios y contenedores */
+    div[data-testid="stForm"] {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        padding: 15px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -251,29 +258,29 @@ if es_admin_autenticado:
     st.sidebar.success("🟢 Sesión Activa")
     st.sidebar.divider()
 
-    st.sidebar.subheader("💱 Configuración Bs (Solo Admin)")
+    # ORGANIZACIÓN MEJORADA: Se usa un expander para no saturar la barra lateral
+    with st.sidebar.expander("💱 Configuración Bs (Admin)", expanded=False):
+        with st.form("form_config_bs_admin"):
+            nueva_tasa = st.number_input(
+                "Tasa cobrada en Bs / $:",
+                min_value=1.0,
+                value=float(tasa_bs_usd),
+                step=0.5,
+            )
 
-    with st.sidebar.form("form_config_bs_admin"):
-        nueva_tasa = st.number_input(
-            "Tasa cobrada en Bs / $:",
-            min_value=1.0,
-            value=float(tasa_bs_usd),
-            step=0.5,
-        )
+            nuevos_codigos = st.text_input(
+                "Códigos en Bs (separados por coma):",
+                value=codigos_bs_str,
+            )
 
-        nuevos_codigos = st.text_input(
-            "Códigos en Bs (separados por coma):",
-            value=codigos_bs_str,
-        )
+            btn_guardar_config = st.form_submit_button(
+                "💾 Guardar Cambios Permanentes", use_container_width=True
+            )
 
-        btn_guardar_config = st.form_submit_button(
-            "💾 Guardar Cambios Permanentes", use_container_width=True
-        )
-
-        if btn_guardar_config:
-            if guardar_configuracion_persistente(nueva_tasa, nuevos_codigos):
-                st.sidebar.success("✅ ¡Configuración guardada!")
-                st.rerun()
+            if btn_guardar_config:
+                if guardar_configuracion_persistente(nueva_tasa, nuevos_codigos):
+                    st.sidebar.success("✅ ¡Configuración guardada!")
+                    st.rerun()
 
 elif clave_admin != "":
     st.sidebar.error("🔴 Clave incorrecta")
@@ -755,7 +762,7 @@ if modo_vista == "👥 Portal del Cliente":
                 )
 
 # ==========================================
-# PESTAÑA 2: PANEL DE ADMINISTRADOR
+# PESTAÑA 2: PANEL DE ADMINISTRADOR (REORGANIZADO)
 # ==========================================
 else:
     st.title("💼 Dashboard de Administración")
@@ -765,22 +772,39 @@ else:
             "🔒 El panel de administración está bloqueado. Por favor ingrese la contraseña en la barra lateral."
         )
     else:
-        seccion_admin = st.segmented_control(
-            "Seleccione una sección:",
+        # MEJORA DE INTERFAZ: Se agrupan los submenús de forma limpia en selectbox por categorías lógicas
+        categoria_panel = st.selectbox(
+            "🗂️ Seleccione el módulo de administración:",
             [
-                "⏳ Abonos por Verificar",
-                "🚨 Clientes Atrasados",
-                "📊 Flujo de Caja",
-                "➕ Registrar Movimiento Directo",
-                "🤝 Préstamos Externos",
-                "💼 Aportes / Retiros Dueño",
-                "🔄 Transferencias",
-                "📉 Gastos Operativos",
-                "✂️ Liquidar Crédito",
-                "📅 Cierre de Mes",
-            ],
-            default="⏳ Abonos por Verificar",
+                "⚡ Operaciones Diarias (Abonos, Clientes, Flujo y Movimientos)",
+                "⚙️ Gestión, Cuentas y Cierres (Préstamos, Gastos, Cierre de Mes)"
+            ]
         )
+
+        if categoria_panel.startswith("⚡"):
+            seccion_admin = st.segmented_control(
+                "Seleccione una sección:",
+                [
+                    "⏳ Abonos por Verificar",
+                    "🚨 Clientes Atrasados",
+                    "📊 Flujo de Caja",
+                    "➕ Registrar Movimiento Directo",
+                ],
+                default="⏳ Abonos por Verificar",
+            )
+        else:
+            seccion_admin = st.segmented_control(
+                "Seleccione una sección:",
+                [
+                    "🤝 Préstamos Externos",
+                    "💼 Aportes / Retiros Dueño",
+                    "🔄 Transferencias",
+                    "📉 Gastos Operativos",
+                    "✂️ Liquidar Crédito",
+                    "📅 Cierre de Mes",
+                ],
+                default="🤝 Préstamos Externos",
+            )
 
         st.divider()
 
