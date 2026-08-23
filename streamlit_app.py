@@ -533,7 +533,7 @@ if modo_vista == "👥 Portal del Cliente":
 
                             frecuencia_lower = concepto_p.lower()
 
-                            # ==========================================
+                    # ==========================================
                     # APARTADO: CUADRO DE DÍAS HÁBILES DE PAGO
                     # ==========================================
                     st.divider()
