@@ -654,16 +654,17 @@ if modo_vista == "👥 Portal del Cliente":
                     st.success(f"🎉 **¡Pago registrado con éxito!** ID: `{id_pago}`")
 
                     # Generar enlace automático para notificar por WhatsApp al Administrador
-                    mensaje_wsp = (
-                        f"Hola Administrador, he reportado un nuevo pago:\n\n"
-                        f"🆔 ID: {id_pago}\n"
-                        f"🏷️ Código: {codigo_final}\n"
-                        f"👤 Nombre: {nombre_clean}\n"
-                        f"📅 Fecha: {fecha_str}\n"
-                        f"💳 Medio: {cuenta_destino}\n"
-                        f"🔢 Referencia: {detalle_referencia}\n"
-                        f"💵 Monto: {monto_reportado}\n"
+                    mensaje_wa = (
+                        f"👋 *NUEVO PAGO REPORTADO*\n\n"
+                        f"📌 *ID:* {id_pago}\n"
+                        f"👤 *Cliente:* {nombre_clean} ({codigo_final})\n"
+                        f"💵 *Monto:* {'Bs. ' + f'{monto_reportado:,.2f}' if ('Bolívares' in moneda_pago) else '$' + f'{monto_reportado:,.2f}'}\n"
+                        f"💱 *Equivalente en Sistema:* ${monto_usd_convertido:,.2f} USD\n"
+                        f"🏦 *Medio:* {cuenta_destino}\n"
+                        f"🔢 *Referencia:* {ref_clean}\n"
+                        f"📅 *Fecha:* {fecha_str}"
                     )
+
                     url_whatsapp = f"https://wa.me/{TELEFONO_ADMIN}?text={urllib.parse.quote(mensaje_wsp)}"
 
                     st.markdown("---")
