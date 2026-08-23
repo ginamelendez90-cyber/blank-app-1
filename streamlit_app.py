@@ -836,6 +836,57 @@ if modo_vista == "👥 Portal del Cliente":
                             use_container_width=True,
                             hide_index=True,
                         )
+                else:
+                    st.error("❌ Código no encontrado.")
+            except Exception as e:
+                st.error(f"Error de conexión: {e}")
+
+    elif opcion_cliente == "📲 Reportar un Pago":
+        st.subheader("📲 Formulario de Reporte de Pago")
+        with st.form("form_reportar_pago_cliente", border=True):
+            col_p1, col_p2 = st.columns(2)
+            cod_cli_rep = col_p1.text_input("Tu Código de Cliente:", value=codigo_url, disabled=True if codigo_url else False)
+            nom_cli_rep = col_p2.text_input("Tu Nombre Completo:", value=nombre_autocompletado)
+
+            col_p3, col_p4 = st.columns(2)
+            f_pago = col_p3.date_input("Fecha del Pago", datetime.now())
+            moneda_pago = col_p4.selectbox("Moneda del Pago:", ["Bolívares (Bs.)", "Dólares ($ / Binance / Efectivo)"])
+
+            col_p5, col_p6 = st.columns(2)
+            monto_reportado = col_p5.number_input("Monto Transferido / Pagado:", min_value=0.01, value=100.0)
+            cuenta_destino = col_p6.selectbox("Medio de Pago Utilizado:", ["Pago Móvil", "Efectivo", "Binance"])
+
+            num_ref = st.text_input("Número de Referencia / Comprobante:")
+            btn_enviar_reporte = st.form_submit_button("💾 Registrar Pago y Preparar WhatsApp", use_container_width=True)
+
+        codigo_final = str(codigo_url if codigo_url else cod_cli_rep).strip().upper()
+
+        if btn_enviar_reporte:
+            if codigo_final and nom_cli_rep and num_ref and monto_reportado > 0:
+                try:
+                    sheet_pendientes = obtener_hoja("PAGOS_PENDIENTES")
+                    id_pago = f"PAG-{str(uuid.uuid4())[:6].upper()}"
+                    nombre_clean = nom_cli_rep.strip()
+                    ref_clean = str(num_ref).strip()
+                    fecha_str = f_pago.strftime("%Y-%m-%d")
+
+                    es_cliente_bs = codigo_final in lista_clientes_bs
+                    if es_cliente_bs and "Bolívares" in moneda_pago:
+                        monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 4)
+                        detalle_referencia = f"{ref_clean} (Bs. {monto_reportado:,.2f} a tasa {tasa_bs_usd})"
+                    else:
+                        monto_usd_convertido = round(monto_reportado, 2)
+                        detalle_referencia = ref_clean
+
+                    sheet_pendientes.append_row([
+                        id_pago, fecha_str, codigo_final, nombre_clean, cuenta_destino, detalle_referencia, float(monto_usd_convertido), "PENDIENTE"
+                    ])
+                    st.cache_data.clear()
+                    st.success(f"🎉 **¡Pago registrado con éxito!** ID: `{id_pago}`")
+                except Exception as e:
+                    st.error(f"Error al enviar el reporte: {e}")
+            else:
+                st.warning("⚠️ Por favor completa todos los campos obligatorios.")
 
 # ==========================================
 # PESTAÑA 2: PANEL DE ADMINISTRADOR (REORGANIZADO)
