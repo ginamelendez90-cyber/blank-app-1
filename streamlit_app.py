@@ -423,7 +423,9 @@ if modo_vista == "👥 Portal del Cliente":
     if codigo_url:
         try:
             df_temp = conn.read(ttl=0, usecols=["Codigo", "Nombre"])
-            df_temp["Codigo"] = df_temp["Codigo"].astype(str).str.strip().str.upper()
+            df_temp["Codigo"] = (
+                df_temp["Codigo"].astype(str).str.strip().str.upper()
+            )
             match = df_temp[df_temp["Codigo"] == codigo_url]
             if not match.empty:
                 nombre_autocompletado = match.iloc[0]["Nombre"]
@@ -533,74 +535,61 @@ if modo_vista == "👥 Portal del Cliente":
 
                             frecuencia_lower = concepto_p.lower()
 
-                    # ==========================================
-                    # APARTADO: CUADRO DE DÍAS HÁBILES DE PAGO
-                    # ==========================================
-                    st.divider()
-                    st.subheader("📅 Cuadro de Días Hábiles de Pago")
-                    st.caption("Cronograma secuencial. Si un día no se paga, queda pendiente y se rellena automáticamente cuando se abona de más.")
+                            dias_cobro = max(0, calcular_dias_cobro_acumulados(f_inicio, f_hoy) - 1)
 
-                    fila_prestamo = mov_actuales[mov_actuales["Concepto"].str.contains("Préstamo", case=False, na=False)]
+                            if "semanal" in frecuencia_lower:
+                                cuotas_esperadas = min(dias_cobro // 6, num_cuotas_p)
+                            elif "quincenal" in frecuencia_lower:
+                                cuotas_esperadas = min(dias_cobro // 12, num_cuotas_p)
+                            elif "mensual" in frecuencia_lower:
+                                cuotas_esperadas = min(dias_cobro // 24, num_cuotas_p)
+                            else:
+                                cuotas_esperadas = min(dias_cobro, num_cuotas_p)
 
-                    if not fila_prestamo.empty:
-                        f_str = str(fila_prestamo.iloc[0]["Fecha"])
-                        f_inicio = pd.to_datetime(f_str).date()
-                        concepto_p = str(fila_prestamo.iloc[0]["Concepto"])
+                            monto_esperado_hoy = cuotas_esperadas * cuota_monto_vis
+                            diferencia_pago = pagos_vis - monto_esperado_hoy
 
-                        match_c = re.search(r'\((\d+)\s*cuotas', concepto_p, re.IGNORECASE)
-                        num_cuotas_p = int(match_c.group(1)) if match_c else 24
-                        cuota_monto_vis = prestamo_vis / num_cuotas_p if num_cuotas_p > 0 else prestamo_vis
-                        frecuencia_lower = concepto_p.lower()
+                            if diferencia_pago >= -0.05:
+                                estado_cliente = "🟢 AL DÍA"
+                                detalle_estatus = f"Has cubierto tus cuotas a la fecha (1 día de gracia incluido)."
+                                color_estatus = "success"
+                            else:
+                                monto_atraso = abs(diferencia_pago)
+                                cuotas_atrasadas = max(1, int(monto_atraso // cuota_monto_vis) if cuota_monto_vis > 0 else 1)
+                                estado_cliente = "🔴 ATRASADO"
+                                detalle_estatus = f"Presentas un retraso de {cuotas_atrasadas} cuota(s) equivalente a {moneda_label} {monto_atraso:,.2f}."
+                                color_estatus = "error"
+                        except Exception:
+                            estado_cliente = "🟢 AL DÍA"
+                            detalle_estatus = "Crédito activo."
+                            color_estatus = "info"
+                    elif saldo_vis <= 0 and not mov_actuales.empty:
+                        estado_cliente = "✅ LIQUIDADO"
+                        detalle_estatus = "No tienes deudas pendientes."
+                        color_estatus = "success"
 
-                        cronograma_data = []
-                        cur_fecha = f_inicio
-                        cuotas_generadas = 0
+                    st.subheader(f"Bienvenido/a, **{nombre}**")
 
-                        while cuotas_generadas < num_cuotas_p:
-                            cur_fecha += timedelta(days=1)
-                            if es_dia_cobro(cur_fecha):
-                                cuotas_generadas += 1
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("📌 Deuda Total Actual", f"{moneda_label} {prestamo_vis:,.2f}")
+                    m2.metric("💵 Total Abonado", f"{moneda_label} {pagos_vis:,.2f}")
+                    m3.metric(
+                        "⚠️ Saldo Pendiente",
+                        f"{moneda_label} {saldo_vis:,.2f}",
+                        delta=f"-{moneda_label} {saldo_vis:,.2f}",
+                        delta_color="inverse",
+                    )
+                    m4.metric("Estatus del Crédito", estado_cliente)
 
-                                incluir_cuota = False
-                                if "semanal" in frecuencia_lower:
-                                    if cuotas_generadas % 6 == 0 or cuotas_generadas == num_cuotas_p:
-                                        incluir_cuota = True
-                                elif "quincenal" in frecuencia_lower:
-                                    if cuotas_generadas % 12 == 0 or cuotas_generadas == num_cuotas_p:
-                                        incluir_cuota = True
-                                elif "mensual" in frecuencia_lower:
-                                    if cuotas_generadas % 24 == 0 or cuotas_generadas == num_cuotas_p:
-                                        incluir_cuota = True
-                                else:  # Diario
-                                    incluir_cuota = True
-
-                                if incluir_cuota or "diario" in frecuencia_lower:
-                                    monto_acumulado_requerido = cuotas_generadas * cuota_monto_vis
-                                    
-                                    if pagos_vis >= monto_acumulado_requerido:
-                                        estado_cuota = "✅ Pagada / Al Día"
-                                    elif pagos_vis >= (monto_acumulado_requerido - cuota_monto_vis):
-                                        estado_cuota = "⏳ Parcial / Pendiente de completar"
-                                    else:
-                                        estado_cuota = "❌ Pendiente"
-
-                                    cronograma_data.append({
-                                        "Cuota #": cuotas_generadas,
-                                        "Fecha Hábil": cur_fecha.strftime("%Y-%m-%d"),
-                                        "Monto Cuota": f"{moneda_label} {cuota_monto_vis:,.2f}",
-                                        "Estatus": estado_cuota
-                                    })
-
-                        if cronograma_data:
-                            df_cronograma = pd.DataFrame(cronograma_data)
-                            st.dataframe(df_cronograma, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("💡 No se pudo generar el cuadro de días hábiles.")
+                    if color_estatus == "error":
+                        st.error(f"⚠️ **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
+                    elif color_estatus == "success":
+                        st.success(f"🎉 **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
                     else:
-                        st.info("💡 No hay un préstamo activo registrado para proyectar el cuadro de días.")
+                        st.info(f"ℹ️ **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
 
                     st.divider()
-                    st.subheader("📋 Historial del Crédito Vigente")
+                    st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
                         df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
@@ -616,6 +605,25 @@ if modo_vista == "👥 Portal del Cliente":
                             use_container_width=True,
                             hide_index=True,
                         )
+
+                    if not mov_historicos.empty:
+                        mov_historicos["Cargo_Vis"] = mov_historicos.apply(calcular_cargo_vista, axis=1)
+                        mov_historicos["Abono_Vis"] = mov_historicos.apply(calcular_abono_vista, axis=1)
+
+                        with st.expander("📂 Ver Historial de Créditos Liquidados"):
+                            df_hist_cli = mov_historicos[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
+
+                            st.dataframe(
+                                df_hist_cli,
+                                column_config={
+                                    "Fecha": st.column_config.TextColumn("Fecha"),
+                                    "Concepto": st.column_config.TextColumn("Concepto / Detalle"),
+                                    "Cargo_Vis": st.column_config.NumberColumn(f"Monto ({moneda_label})", format=f"{moneda_label} %.2f"),
+                                    "Abono_Vis": st.column_config.NumberColumn(f"Abonado ({moneda_label})", format=f"{moneda_label} %.2f"),
+                                },
+                                use_container_width=True,
+                                hide_index=True,
+                            )
                 else:
                     st.error("❌ Código no encontrado.")
             except Exception as e:
@@ -623,21 +631,53 @@ if modo_vista == "👥 Portal del Cliente":
 
     elif opcion_cliente == "📲 Reportar un Pago":
         st.subheader("📲 Formulario de Reporte de Pago")
+        st.caption("Registra tu transferencia o pago móvil.")
+
+        if codigo_url:
+            st.info(f"✨ **Formulario activado para el cliente:** `{codigo_url}`")
+
         with st.form("form_reportar_pago_cliente", border=True):
             col_p1, col_p2 = st.columns(2)
-            cod_cli_rep = col_p1.text_input("Tu Código de Cliente:", value=codigo_url, disabled=True if codigo_url else False)
-            nom_cli_rep = col_p2.text_input("Tu Nombre Completo:", value=nombre_autocompletado)
+
+            cod_cli_rep = col_p1.text_input(
+                "Tu Código de Cliente:",
+                value=codigo_url,
+                placeholder="Ej. CLI-001",
+                disabled=True if codigo_url else False,
+            )
+            nom_cli_rep = col_p2.text_input(
+                "Tu Nombre Completo:",
+                value=nombre_autocompletado,
+                placeholder="Ej. Juan Pérez",
+            )
 
             col_p3, col_p4 = st.columns(2)
             f_pago = col_p3.date_input("Fecha del Pago", datetime.now())
-            moneda_pago = col_p4.selectbox("Moneda del Pago:", ["Bolívares (Bs.)", "Dólares ($ / Binance / Efectivo)"])
+            moneda_pago = col_p4.selectbox(
+                "Moneda del Pago:",
+                ["Bolívares (Bs.)", "Dólares ($ / Binance / Efectivo)"],
+            )
 
             col_p5, col_p6 = st.columns(2)
-            monto_reportado = col_p5.number_input("Monto Transferido / Pagado:", min_value=0.01, value=100.0)
-            cuenta_destino = col_p6.selectbox("Medio de Pago Utilizado:", ["Pago Móvil", "Efectivo", "Binance"])
 
-            num_ref = st.text_input("Número de Referencia / Comprobante:")
-            btn_enviar_reporte = st.form_submit_button("💾 Registrar Pago y Preparar WhatsApp", use_container_width=True)
+            monto_reportado = col_p5.number_input(
+                "Monto Transferido / Pagado:", min_value=0.01, value=100.0, step=10.0
+            )
+
+            cuenta_destino = col_p6.selectbox(
+                "Medio de Pago Utilizado:",
+                ["Pago Móvil", "Efectivo", "Binance"],
+            )
+
+            num_ref = st.text_input(
+                "Número de Referencia / Comprobante:",
+                placeholder="Ej. 849302",
+            )
+
+            btn_enviar_reporte = st.form_submit_button(
+                "💾 Registrar Pago y Preparar WhatsApp",
+                use_container_width=True,
+            )
 
         codigo_final = str(codigo_url if codigo_url else cod_cli_rep).strip().upper()
 
@@ -651,6 +691,7 @@ if modo_vista == "👥 Portal del Cliente":
                     fecha_str = f_pago.strftime("%Y-%m-%d")
 
                     es_cliente_bs = codigo_final in lista_clientes_bs
+
                     if es_cliente_bs and "Bolívares" in moneda_pago:
                         monto_usd_convertido = round(monto_reportado / tasa_bs_usd, 4)
                         detalle_referencia = f"{ref_clean} (Bs. {monto_reportado:,.2f} a tasa {tasa_bs_usd})"
@@ -658,13 +699,28 @@ if modo_vista == "👥 Portal del Cliente":
                         monto_usd_convertido = round(monto_reportado, 2)
                         detalle_referencia = ref_clean
 
-                    sheet_pendientes.append_row([
-                        id_pago, fecha_str, codigo_final, nombre_clean, cuenta_destino, detalle_referencia, float(monto_usd_convertido), "PENDIENTE"
-                    ])
-                    st.cache_data.clear()
-                    st.success(f"🎉 **¡Pago registrado con éxito!** ID: `{id_pago}`")
+                    sheet_pendientes.append_row(
+                        [
+                            id_pago,
+                            fecha_str,
+                            codigo_final,
+                            nombre_clean,
+                            cuenta_destino,
+                            detalle_referencia,
+                            float(monto_usd_convertido),
+                            "PENDIENTE",
+                        ]
+                    )
 
-                    # Generar enlace automático para notificar por WhatsApp al Administrador
+                    st.cache_data.clear()
+
+                    st.success(
+                        f"🎉 **¡Pago registrado en el sistema con éxito!**\n\n"
+                        f"📌 **Monto ingresado:** {'Bs. ' + f'{monto_reportado:,.2f}' if ('Bolívares' in moneda_pago) else '$' + f'{monto_reportado:,.2f}'}\n"
+                        f"📌 **Abono equivalente en Flujo de Caja ($):** `${monto_usd_convertido:,.2f} USD`\n"
+                        f"📌 **ID de Registro:** `{id_pago}`"
+                    )
+
                     mensaje_wa = (
                         f"👋 *NUEVO PAGO REPORTADO*\n\n"
                         f"📌 *ID:* {id_pago}\n"
@@ -675,18 +731,35 @@ if modo_vista == "👥 Portal del Cliente":
                         f"🔢 *Referencia:* {ref_clean}\n"
                         f"📅 *Fecha:* {fecha_str}"
                     )
+                    mensaje_encoded = urllib.parse.quote(mensaje_wa)
+                    link_wame = f"https://wa.me/{TELEFONO_ADMIN}?text={mensaje_encoded}"
 
-                    url_whatsapp = f"https://wa.me/{TELEFONO_ADMIN}?text={urllib.parse.quote(mensaje_wsp)}"
-
-                    st.markdown("---")
-                    st.markdown("### 📲 Notificar por WhatsApp")
-                    st.info("Haz clic en el siguiente botón para enviar los detalles del pago directamente al WhatsApp del administrador:")
-                    st.link_button("💬 Enviar Comprobante por WhatsApp", url_whatsapp, use_container_width=True)
+                    st.markdown(
+                        f"""
+                        <a href="{link_wame}" target="_blank" style="text-decoration: none;">
+                            <div style="
+                                background-color: #25D366;
+                                color: white;
+                                padding: 14px 20px;
+                                text-align: center;
+                                font-weight: bold;
+                                font-size: 16px;
+                                border-radius: 8px;
+                                margin-top: 10px;
+                                cursor: pointer;">
+                                📤 Enviar Comprobante por WhatsApp 📲
+                            </div>
+                        </a>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
                 except Exception as e:
                     st.error(f"Error al enviar el reporte: {e}")
             else:
-                st.warning("⚠️ Por favor completa todos los campos obligatorios.")
+                st.warning(
+                    "⚠️ Por favor completa todos los campos obligatorios (Nombre, Monto y Referencia)."
+                )
 
 # ==========================================
 # PESTAÑA 2: PANEL DE ADMINISTRADOR (REORGANIZADO)
