@@ -400,7 +400,7 @@ def mostrar_detalle_abonos_cliente(codigo_cliente, nombre_cliente, df_completo):
 
 
 # ==========================================
-# PESTAÑA 1: PORTAL DEL CLIENTE (CON CUADRO DE DÍAS HÁBILES)
+# PESTAÑA 1: PORTAL DEL CLIENTE
 # ==========================================
 if modo_vista == "👥 Portal del Cliente":
     st.title("👥 Portal de Atención al Cliente")
@@ -527,7 +527,7 @@ if modo_vista == "👥 Portal del Cliente":
                     # ==========================================
                     st.divider()
                     st.subheader("📅 Cuadro de Días Hábiles de Pago")
-                    st.caption("Cronograma de cuotas y rango de días hábiles (excluyendo domingos y feriados nacionales).")
+                    st.caption("Cronograma secuencial. Si un día no se paga, queda pendiente y se rellena automáticamente cuando se abona de más.")
 
                     fila_prestamo = mov_actuales[mov_actuales["Concepto"].str.contains("Préstamo", case=False, na=False)]
 
@@ -564,7 +564,15 @@ if modo_vista == "👥 Portal del Cliente":
                                     incluir_cuota = True
 
                                 if incluir_cuota or "diario" in frecuencia_lower:
-                                    estado_cuota = "✅ Pagada / Al Día" if cuotas_generadas * cuota_monto_vis <= pagos_vis else "⏳ Pendiente"
+                                    monto_acumulado_requerido = cuotas_generadas * cuota_monto_vis
+                                    
+                                    if pagos_vis >= monto_acumulado_requerido:
+                                        estado_cuota = "✅ Pagada / Al Día"
+                                    elif pagos_vis >= (monto_acumulado_requerido - cuota_monto_vis):
+                                        estado_cuota = "⏳ Parcial / Pendiente de completar"
+                                    else:
+                                        estado_cuota = "❌ Pendiente"
+
                                     cronograma_data.append({
                                         "Cuota #": cuotas_generadas,
                                         "Fecha Hábil": cur_fecha.strftime("%Y-%m-%d"),
@@ -644,6 +652,25 @@ if modo_vista == "👥 Portal del Cliente":
                     ])
                     st.cache_data.clear()
                     st.success(f"🎉 **¡Pago registrado con éxito!** ID: `{id_pago}`")
+
+                    # Generar enlace automático para notificar por WhatsApp al Administrador
+                    mensaje_wsp = (
+                        f"Hola Administrador, he reportado un nuevo pago:\n\n"
+                        f"🆔 ID: {id_pago}\n"
+                        f"🏷️ Código: {codigo_final}\n"
+                        f"👤 Nombre: {nombre_clean}\n"
+                        f"📅 Fecha: {fecha_str}\n"
+                        f"💳 Medio: {cuenta_destino}\n"
+                        f"🔢 Referencia: {detalle_referencia}\n"
+                        f"💵 Monto: {monto_reportado}\n"
+                    )
+                    url_whatsapp = f"https://wa.me/{TELEFONO_ADMIN}?text={urllib.parse.quote(mensaje_wsp)}"
+
+                    st.markdown("---")
+                    st.markdown("### 📲 Notificar por WhatsApp")
+                    st.info("Haz clic en el siguiente botón para enviar los detalles del pago directamente al WhatsApp del administrador:")
+                    st.link_button("💬 Enviar Comprobante por WhatsApp", url_whatsapp, use_container_width=True)
+
                 except Exception as e:
                     st.error(f"Error al enviar el reporte: {e}")
             else:
