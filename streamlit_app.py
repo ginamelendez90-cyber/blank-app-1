@@ -423,9 +423,7 @@ if modo_vista == "👥 Portal del Cliente":
     if codigo_url:
         try:
             df_temp = conn.read(ttl=0, usecols=["Codigo", "Nombre"])
-            df_temp["Codigo"] = (
-                df_temp["Codigo"].astype(str).str.strip().str.upper()
-            )
+            df_temp["Codigo"] = df_temp["Codigo"].astype(str).str.strip().str.upper()
             match = df_temp[df_temp["Codigo"] == codigo_url]
             if not match.empty:
                 nombre_autocompletado = match.iloc[0]["Nombre"]
@@ -433,7 +431,7 @@ if modo_vista == "👥 Portal del Cliente":
             pass
 
     if opcion_cliente == "🔎 Consultar Estado de Cuenta":
-        st.write("Consulta el estado actual de tu crédito y tu cronograma de días hábiles de pago.")
+        st.write("Consulta el estado actual de tu crédito y tu historial.")
 
         with st.container(border=True):
             col_busq1, col_busq2 = st.columns([3, 1])
@@ -467,6 +465,7 @@ if modo_vista == "👥 Portal del Cliente":
 
                 if not resultado.empty:
                     nombre = resultado.iloc[0]["Nombre"]
+
                     es_cliente_bs = cod_clean in lista_clientes_bs
                     moneda_label = "Bs." if es_cliente_bs else "$"
 
@@ -515,81 +514,90 @@ if modo_vista == "👥 Portal del Cliente":
                     else:
                         prestamo_vis, pagos_vis, saldo_vis = 0.0, 0.0, 0.0
 
+                    estado_cliente = "🟢 AL DÍA"
+                    detalle_estatus = "Su crédito está al día."
+                    color_estatus = "success"
+
+                    fila_prestamo = mov_actuales[mov_actuales["Concepto"].str.contains("Préstamo", case=False, na=False)]
+
+                    if not fila_prestamo.empty and saldo_vis > 0:
+                        try:
+                            f_str = str(fila_prestamo.iloc[0]["Fecha"])
+                            f_inicio = pd.to_datetime(f_str).date()
+                            f_hoy = datetime.now().date()
+                            concepto_p = str(fila_prestamo.iloc[0]["Concepto"])
+
+                            match_c = re.search(r'\((\d+)\s*cuotas', concepto_p, re.IGNORECASE)
+                            num_cuotas_p = int(match_c.group(1)) if match_c else 24
+                            cuota_monto_vis = prestamo_vis / num_cuotas_p if num_cuotas_p > 0 else prestamo_vis
+
+                            frecuencia_lower = concepto_p.lower()
+
+                            # ==========================================
+                            # NUEVO: CÁLCULO DE DÍAS HÁBILES Y CUOTAS ESPERADAS
+                            # ==========================================
+                            # Cuenta únicamente días de lunes a viernes (excluye fines de semana)
+                            dias_habiles_transcurridos = len(pd.bdate_range(start=f_inicio, end=f_hoy))
+                            dias_habiles_efectivos = max(0, dias_habiles_transcurridos - 1)
+
+                            if "semanal" in frecuencia_lower:
+                                # Cada 5 días hábiles equivale a una cuota semanal
+                                cuotas_esperadas = min(dias_habiles_efectivos // 5, num_cuotas_p)
+                            elif "quincenal" in frecuencia_lower:
+                                # Cada 10 o 15 días hábiles según estimación comercial (ej. 10 días hábiles = 2 semanas)
+                                cuotas_esperadas = min(dias_habiles_efectivos // 10, num_cuotas_p)
+                            elif "mensual" in frecuencia_lower:
+                                # Aproximadamente 20-22 días hábiles al mes
+                                cuotas_esperadas = min(dias_habiles_efectivos // 20, num_cuotas_p)
+                            else:
+                                cuotas_esperadas = min(dias_habiles_efectivos, num_cuotas_p)
+
+                            monto_esperado_hoy = cuotas_esperadas * cuota_monto_vis
+                            
+                            # Diferencia: Si pagos_vis es mayor o igual al acumulado esperado, se cubren atrasos pasados automáticamente
+                            diferencia_pago = pagos_vis - monto_esperado_hoy
+
+                            if diferencia_pago >= -0.05:
+                                estado_cliente = "🟢 AL DÍA"
+                                detalle_estatus = "Has cubierto tus cuotas hábiles correspondientes y estás al día."
+                                color_estatus = "success"
+                            else:
+                                monto_atraso = abs(diferencia_pago)
+                                cuotas_atrasadas = max(1, int(monto_atraso // cuota_monto_vis) if cuota_monto_vis > 0 else 1)
+                                estado_cliente = "🔴 ATRASADO"
+                                detalle_estatus = f"Tienes un retraso de {cuotas_atrasadas} cuota(s) hábiles pendientes por un valor de {moneda_label} {monto_atraso:,.2f}."
+                                color_estatus = "error"
+                        except Exception:
+                            estado_cliente = "🟢 AL DÍA"
+                            detalle_estatus = "Crédito activo."
+                            color_estatus = "info"
+                    elif saldo_vis <= 0 and not mov_actuales.empty:
+                        estado_cliente = "✅ LIQUIDADO"
+                        detalle_estatus = "No tienes deudas pendientes."
+                        color_estatus = "success"
+
                     st.subheader(f"Bienvenido/a, **{nombre}**")
 
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("📌 Deuda Total Actual", f"{moneda_label} {prestamo_vis:,.2f}")
                     m2.metric("💵 Total Abonado", f"{moneda_label} {pagos_vis:,.2f}")
-                    m3.metric("⚠️ Saldo Pendiente", f"{moneda_label} {saldo_vis:,.2f}")
+                    m3.metric(
+                        "⚠️ Saldo Pendiente",
+                        f"{moneda_label} {saldo_vis:,.2f}",
+                        delta=f"-{moneda_label} {saldo_vis:,.2f}",
+                        delta_color="inverse",
+                    )
+                    m4.metric("Estatus del Crédito", estado_cliente)
 
-                    # ==========================================
-                    # APARTADO: CUADRO DE DÍAS HÁBILES DE PAGO
-                    # ==========================================
-                    st.divider()
-                    st.subheader("📅 Cuadro de Días Hábiles de Pago")
-                    st.caption("Cronograma secuencial. Si un día no se paga, queda pendiente y se rellena automáticamente cuando se abona de más.")
-
-                    fila_prestamo = mov_actuales[mov_actuales["Concepto"].str.contains("Préstamo", case=False, na=False)]
-
-                    if not fila_prestamo.empty:
-                        f_str = str(fila_prestamo.iloc[0]["Fecha"])
-                        f_inicio = pd.to_datetime(f_str).date()
-                        concepto_p = str(fila_prestamo.iloc[0]["Concepto"])
-
-                        match_c = re.search(r'\((\d+)\s*cuotas', concepto_p, re.IGNORECASE)
-                        num_cuotas_p = int(match_c.group(1)) if match_c else 24
-                        cuota_monto_vis = prestamo_vis / num_cuotas_p if num_cuotas_p > 0 else prestamo_vis
-                        frecuencia_lower = concepto_p.lower()
-
-                        cronograma_data = []
-                        cur_fecha = f_inicio
-                        cuotas_generadas = 0
-
-                        while cuotas_generadas < num_cuotas_p:
-                            cur_fecha += timedelta(days=1)
-                            if es_dia_cobro(cur_fecha):
-                                cuotas_generadas += 1
-
-                                incluir_cuota = False
-                                if "semanal" in frecuencia_lower:
-                                    if cuotas_generadas % 6 == 0 or cuotas_generadas == num_cuotas_p:
-                                        incluir_cuota = True
-                                elif "quincenal" in frecuencia_lower:
-                                    if cuotas_generadas % 12 == 0 or cuotas_generadas == num_cuotas_p:
-                                        incluir_cuota = True
-                                elif "mensual" in frecuencia_lower:
-                                    if cuotas_generadas % 24 == 0 or cuotas_generadas == num_cuotas_p:
-                                        incluir_cuota = True
-                                else:  # Diario
-                                    incluir_cuota = True
-
-                                if incluir_cuota or "diario" in frecuencia_lower:
-                                    monto_acumulado_requerido = cuotas_generadas * cuota_monto_vis
-                                    
-                                    if pagos_vis >= monto_acumulado_requerido:
-                                        estado_cuota = "✅ Pagada / Al Día"
-                                    elif pagos_vis >= (monto_acumulado_requerido - cuota_monto_vis):
-                                        estado_cuota = "⏳ Parcial / Pendiente de completar"
-                                    else:
-                                        estado_cuota = "❌ Pendiente"
-
-                                    cronograma_data.append({
-                                        "Cuota #": cuotas_generadas,
-                                        "Fecha Hábil": cur_fecha.strftime("%Y-%m-%d"),
-                                        "Monto Cuota": f"{moneda_label} {cuota_monto_vis:,.2f}",
-                                        "Estatus": estado_cuota
-                                    })
-
-                        if cronograma_data:
-                            df_cronograma = pd.DataFrame(cronograma_data)
-                            st.dataframe(df_cronograma, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("💡 No se pudo generar el cuadro de días hábiles.")
+                    if color_estatus == "error":
+                        st.error(f"⚠️ **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
+                    elif color_estatus == "success":
+                        st.success(f"🎉 **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
                     else:
-                        st.info("💡 No hay un préstamo activo registrado para proyectar el cuadro de días.")
+                        st.info(f"ℹ️ **Estatus Actual:** {estado_cliente} — {detalle_estatus}")
 
                     st.divider()
-                    st.subheader("📋 Historial del Crédito Vigente")
+                    st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
                         df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
@@ -605,6 +613,25 @@ if modo_vista == "👥 Portal del Cliente":
                             use_container_width=True,
                             hide_index=True,
                         )
+
+                    if not mov_historicos.empty:
+                        mov_historicos["Cargo_Vis"] = mov_historicos.apply(calcular_cargo_vista, axis=1)
+                        mov_historicos["Abono_Vis"] = mov_historicos.apply(calcular_abono_vista, axis=1)
+
+                        with st.expander("📂 Ver Historial de Créditos Liquidados"):
+                            df_hist_cli = mov_historicos[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
+
+                            st.dataframe(
+                                df_hist_cli,
+                                column_config={
+                                    "Fecha": st.column_config.TextColumn("Fecha"),
+                                    "Concepto": st.column_config.TextColumn("Concepto / Detalle"),
+                                    "Cargo_Vis": st.column_config.NumberColumn(f"Monto ({moneda_label})", format=f"{moneda_label} %.2f"),
+                                    "Abono_Vis": st.column_config.NumberColumn(f"Abonado ({moneda_label})", format=f"{moneda_label} %.2f"),
+                                },
+                                use_container_width=True,
+                                hide_index=True,
+                            )
                 else:
                     st.error("❌ Código no encontrado.")
             except Exception as e:
