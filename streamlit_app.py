@@ -592,7 +592,7 @@ if modo_vista == "👥 Portal del Cliente":
                     st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
-                        # --- CALENDARIO ESTRICTO CRONOLÓGICO DÍA A DÍA ---
+                        # --- CALENDARIO BASADO EN FECHAS REALES DE PAGO ---
                         try:
                             if not fila_prestamo.empty:
                                 f_str_p = str(fila_prestamo.iloc[0]["Fecha"])
@@ -603,15 +603,15 @@ if modo_vista == "👥 Portal del Cliente":
                                 n_cuotas = int(match_cc.group(1)) if match_cc else 24
                                 vlr_cuota = prestamo_vis / n_cuotas if n_cuotas > 0 else prestamo_vis
                                 
-                                # Extraer los pagos reales realizados por el cliente ordenados por fecha
-                                df_pagos_realizados = mov_actuales[mov_actuales["Abono_Vis"] > 0].copy()
-                                if not df_pagos_realizados.empty:
-                                    df_pagos_realizados["Fecha_Dt"] = pd.to_datetime(df_pagos_realizados["Fecha"]).dt.date
-                                    df_pagos_realizados = df_pagos_realizados.sort_values("Fecha_Dt")
+                                # 1. Extraer los pagos reales y agruparlos por su fecha exacta de transacción
+                                df_pagos_reales = mov_actuales[mov_actuales["Abono_Vis"] > 0].copy()
+                                if not df_pagos_reales.empty:
+                                    df_pagos_reales["Fecha_Dt"] = pd.to_datetime(df_pagos_reales["Fecha"]).dt.date
+                                    pagos_por_fecha = df_pagos_reales.groupby("Fecha_Dt")["Abono_Vis"].sum().to_dict()
                                 else:
-                                    df_pagos_realizados = pd.DataFrame(columns=["Fecha_Dt", "Abono_Vis"])
+                                    pagos_por_fecha = {}
 
-                                # Generar las fechas programadas del crédito
+                                # 2. Generar las fechas programadas del calendario de cuotas
                                 fechas_calendario = []
                                 f_actual_iter = f_inicio_cred
                                 
@@ -623,27 +623,18 @@ if modo_vista == "👥 Portal del Cliente":
                                     elif "mensual" in concepto_cred:
                                         f_actual_iter += timedelta(days=30)
                                     else:
-                                        f_actual_iter += timedelta(days=1)
+                                        f_actual_iter += timedelta(days=1)  # Préstamo Diario
                                         
                                     fechas_calendario.append((i, f_actual_iter))
                                     
-                                # Mapear los pagos reales a sus respectivas fechas de pago para validación exacta
+                                # 3. Evaluar día a día contrastando contra los pagos reales de esa fecha
                                 hoy_date = datetime.now().date()
                                 detalle_calendario = []
                                 
-                                # Convertir pagos en una lista acumulativa cronológica por fecha exacta
-                                lista_pagos = []
-                                for _, row_p in df_pagos_realizados.iterrows():
-                                    lista_pagos.append({"fecha": row_p["Fecha_Dt"], "monto": float(row_p["Abono_Vis"])})
-
                                 for num_c, fecha_c in fechas_calendario:
-                                    # Sumar todos los abonos realizados exactamente en o antes de esta fecha programada (con un margen razonable de días o acumulando si cubren)
-                                    # Una forma limpia es ir descontando de los pagos registrados cronológicamente
-                                    pagos_hasta_fecha = sum([p["monto"] for p in lista_pagos if p["fecha"] <= fecha_c + timedelta(days=1)])
+                                    monto_abonado_en_fecha = pagos_por_fecha.get(fecha_c, 0.0)
                                     
-                                    # O validando si el monto total acumulado de pagos a la fecha cubre la cuota correspondiente
-                                    # Para ser más exactos: revisamos si hay abono registrado en esa fecha exacta o si el acumulado cubre esta cuota específica
-                                    if pagos_hasta_fecha >= (num_c * vlr_cuota) - 0.05:
+                                    if monto_abonado_en_fecha >= vlr_cuota - 0.05:
                                         estatus_dia = "✅ Pagado"
                                     else:
                                         if fecha_c <= hoy_date:
@@ -660,14 +651,14 @@ if modo_vista == "👥 Portal del Cliente":
                                     
                                 df_calendario = pd.DataFrame(detalle_calendario)
                                 
-                                with st.expander("📅 Detalle Cronológico de Cuotas por Fecha", expanded=True):
+                                with st.expander("📅 Detalle de Pagos y Atrasos por Fecha Exacta", expanded=True):
                                     st.dataframe(
                                         df_calendario,
                                         use_container_width=True,
                                         hide_index=True
                                     )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            st.error(f"Error generando calendario: {e}")
                         # -----------------------------------------------------------------
 
                         df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
