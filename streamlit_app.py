@@ -592,6 +592,29 @@ if modo_vista == "👥 Portal del Cliente":
                     st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
+                        # --- CUADRO DE RESUMEN DE DÍAS / CUOTAS PAGADAS Y NO PAGADAS ---
+                        try:
+                            total_abonado_calc = mov_actuales["Abono_Vis"].sum()
+                            total_prestamo_calc = mov_actuales["Cargo_Vis"].sum()
+                            
+                            match_c_dias = re.search(r'\((\d+)\s*cuotas', str(fila_prestamo.iloc[0]["Concepto"] if not fila_prestamo.empty else ""), re.IGNORECASE)
+                            num_c_dias = int(match_c_dias.group(1)) if match_c_dias else 24
+                            vlr_cuota_calc = total_prestamo_calc / num_c_dias if num_c_dias > 0 else total_prestamo_calc
+                            
+                            dias_pagados_est = int(total_abonado_calc // vlr_cuota_calc) if vlr_cuota_calc > 0 else 0
+                            dias_pagados_est = min(dias_pagados_est, num_c_dias)
+                            dias_no_pagados_est = max(0, num_c_dias - dias_pagados_est)
+                            
+                            col_d1, col_d2, col_d3 = st.columns(3)
+                            col_d1.metric("📅 Cuotas / Días Totales", f"{num_c_dias}")
+                            col_d2.metric("✅ Cuotas Pagadas", f"{dias_pagados_est}")
+                            col_d3.metric("❌ Cuotas Pendientes", f"{dias_no_pagados_est}", delta=f"-{dias_no_pagados_est}" if dias_no_pagados_est > 0 else "Al día", delta_color="inverse")
+                            
+                            st.markdown("")
+                        except Exception:
+                            pass
+                        # -------------------------------------------------------------
+
                         df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
 
                         st.dataframe(
