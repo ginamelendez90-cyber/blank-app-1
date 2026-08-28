@@ -588,7 +588,7 @@ if modo_vista == "👥 Portal del Cliente":
                     st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
-                        # --- CALENDARIO SALTANDO DOMINGOS Y FESTIVOS CON DÍA DE GRACIA ---
+                        # --- CALENDARIO VINCULANDO EL PAGO A SU FECHA EXACTA ---
                         try:
                             if not fila_prestamo.empty:
                                 f_str_p = str(fila_prestamo.iloc[0]["Fecha"])
