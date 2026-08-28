@@ -13,12 +13,6 @@ from streamlit_gsheets import GSheetsConnection
 # ==========================================
 TELEFONO_ADMIN = "584123801615"
 
-# Lista de días festivos fijos o nacionales (formato "YYYY-MM-DD")
-DIAS_FESTIVOS = [
-    "2026-01-01", "2026-04-19", "2026-05-01", "2026-06-24", 
-    "2026-07-05", "2026-07-24", "2026-10-12", "2026-12-25"
-]
-
 def verificar_actualizacion_medianoche():
     """Verifica si ha cruzado las 12:00 AM para ejecutar procesos o limpieza diaria."""
     ahora = datetime.now()
@@ -32,19 +26,27 @@ def verificar_actualizacion_medianoche():
         st.session_state["ultima_fecha_verificacion"] = hoy_str
         st.cache_data.clear()
 
-def es_dia_habil(fecha_obj):
-    """Verifica si una fecha es hábil (No es domingo [weekday() == 6] ni festivo)."""
-    fecha_str = fecha_obj.strftime("%Y-%m-%d")
-    if fecha_obj.weekday() == 6 or fecha_str in DIAS_FESTIVOS:
+def es_dia_cobro(fecha_obj):
+    """Devuelve False si es Domingo o Feriado Nacional."""
+    if fecha_obj.weekday() == 6:  # 6 = Domingo
         return False
+    
+    festivos_fijos = [
+        (1, 1),   # Año Nuevo
+        (19, 4),  # Declaración de Independencia
+        (1, 5),   # Día del Trabajador
+        (24, 6),  # Batalla de Carabobo
+        (5, 7),   # Día de la Independencia
+        (24, 7),  # Natalicio de Simón Bolívar
+        (12, 10), # Día de la Resistencia Indígena
+        (24, 12), # Nochebuena
+        (25, 12), # Navidad
+        (31, 12)  # Fin de Año
+    ]
+    if (fecha_obj.day, fecha_obj.month) in festivos_fijos:
+        return False
+        
     return True
-
-def obtener_siguiente_dia_habil(fecha_obj):
-    """Avanza la fecha hasta encontrar el siguiente día laborable (salta domingos y festivos)."""
-    f_sig = fecha_obj + timedelta(days=1)
-    while not es_dia_habil(f_sig):
-        f_sig += timedelta(days=1)
-    return f_sig
 
 def calcular_dias_cobro_acumulados(fecha_inicio, fecha_fin):
     """Cuenta los días hábiles de cobro transcurridos excluyendo domingos y feriados."""
@@ -53,7 +55,7 @@ def calcular_dias_cobro_acumulados(fecha_inicio, fecha_fin):
     dias_validos = 0
     cur = fecha_inicio + timedelta(days=1)
     while cur <= fecha_fin:
-        if es_dia_habil(cur):
+        if es_dia_cobro(cur):
             dias_validos += 1
         cur += timedelta(days=1)
     return dias_validos
@@ -89,6 +91,7 @@ st.markdown(
     div[data-testid="stSidebarNav"] {
         padding-top: 10px;
     }
+    /* Estilos visuales optimizados para formularios y contenedores */
     div[data-testid="stForm"] {
         background-color: #161b22;
         border: 1px solid #30363d;
@@ -255,6 +258,7 @@ if es_admin_autenticado:
     st.sidebar.success("🟢 Sesión Activa")
     st.sidebar.divider()
 
+    # ORGANIZACIÓN MEJORADA: Se usa un expander para no saturar la barra lateral
     with st.sidebar.expander("💱 Configuración Bs (Admin)", expanded=False):
         with st.form("form_config_bs_admin"):
             nueva_tasa = st.number_input(
@@ -588,76 +592,6 @@ if modo_vista == "👥 Portal del Cliente":
                     st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
-                        # --- CALENDARIO VINCULANDO EL PAGO A SU FECHA EXACTA ---
-                        try:
-                            if not fila_prestamo.empty:
-                                f_str_p = str(fila_prestamo.iloc[0]["Fecha"])
-                                f_inicio_cred = pd.to_datetime(f_str_p).date()
-                                concepto_cred = str(fila_prestamo.iloc[0]["Concepto"]).lower()
-                                
-                                match_cc = re.search(r'\((\d+)\s*cuotas', concepto_cred, re.IGNORECASE)
-                                n_cuotas = int(match_cc.group(1)) if match_cc else 24
-                                vlr_cuota = prestamo_vis / n_cuotas if n_cuotas > 0 else prestamo_vis
-                                
-                                df_pagos_reales = mov_actuales[mov_actuales["Abono_Vis"] > 0].copy()
-                                if not df_pagos_reales.empty:
-                                    df_pagos_reales["Fecha_Dt"] = pd.to_datetime(df_pagos_reales["Fecha"]).dt.date
-                                    pagos_por_fecha = df_pagos_reales.groupby("Fecha_Dt")["Abono_Vis"].sum().to_dict()
-                                else:
-                                    pagos_por_fecha = {}
-
-                                fechas_calendario = []
-                                f_actual_iter = f_inicio_cred
-                                
-                                for i in range(1, n_cuotas + 1):
-                                    if "semanal" in concepto_cred:
-                                        f_actual_iter += timedelta(days=7)
-                                    elif "quincenal" in concepto_cred:
-                                        f_actual_iter += timedelta(days=14)
-                                    elif "mensual" in concepto_cred:
-                                        f_actual_iter += timedelta(days=30)
-                                    else:
-                                        f_actual_iter = obtener_siguiente_dia_habil(f_actual_iter)
-                                        
-                                    fechas_calendario.append((i, f_actual_iter))
-                                    
-                                hoy_date = datetime.now().date()
-                                detalle_calendario = []
-                                
-                                for num_c, fecha_c in fechas_calendario:
-                                    monto_abonado_en_fecha = pagos_por_fecha.get(fecha_c, 0.0)
-                                    
-                                    if monto_abonado_en_fecha >= vlr_cuota - 0.05:
-                                        estatus_dia = "✅ Pagado"
-                                    else:
-                                        fecha_limite_gracia = obtener_siguiente_dia_habil(fecha_c)
-                                        
-                                        if hoy_date > fecha_limite_gracia:
-                                            estatus_dia = "❌ Atrasado"
-                                        elif hoy_date == fecha_limite_gracia or hoy_date == fecha_c:
-                                            estatus_dia = "⏳ Pendiente (Día de Gracia)"
-                                        else:
-                                            estatus_dia = "⏳ Pendiente"
-                                            
-                                    detalle_calendario.append({
-                                        "Cuota #": f"Cuota {num_c}",
-                                        "Fecha Programada": fecha_c.strftime("%Y-%m-%d"),
-                                        "Monto Cuota": f"{moneda_label} {vlr_cuota:,.2f}",
-                                        "Estatus": estatus_dia
-                                    })
-                                    
-                                df_calendario = pd.DataFrame(detalle_calendario)
-                                
-                                with st.expander("📅 Detalle de Pagos (Excluyendo Domingos y Festivos)", expanded=True):
-                                    st.dataframe(
-                                        df_calendario,
-                                        use_container_width=True,
-                                        hide_index=True
-                                    )
-                        except Exception as e:
-                            st.error(f"Error generando calendario: {e}")
-                        # --------------------------------------------------------------------
-
                         df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
 
                         st.dataframe(
@@ -828,7 +762,7 @@ if modo_vista == "👥 Portal del Cliente":
                 )
 
 # ==========================================
-# PESTAÑA 2: PANEL DE ADMINISTRADOR
+# PESTAÑA 2: PANEL DE ADMINISTRADOR (REORGANIZADO)
 # ==========================================
 else:
     st.title("💼 Dashboard de Administración")
@@ -838,6 +772,7 @@ else:
             "🔒 El panel de administración está bloqueado. Por favor ingrese la contraseña en la barra lateral."
         )
     else:
+        # MEJORA DE INTERFAZ: Se agrupan los submenús de forma limpia en selectbox por categorías lógicas
         categoria_panel = st.selectbox(
             "🗂️ Seleccione el módulo de administración:",
             [
@@ -1024,7 +959,7 @@ else:
                 st.error(f"Error al cargar pagos pendientes: {e}")
 
         # ------------------------------------------
-        # 2. CLIENTES ATRASADOS
+        # 2. CLIENTES ATRASADOS (CON 1 DÍA DE GRACIA)
         # ------------------------------------------
         elif seccion_admin == "🚨 Clientes Atrasados":
             st.subheader("🚨 Control de Clientes en Arreos / Atrasados")
