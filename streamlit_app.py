@@ -592,7 +592,7 @@ if modo_vista == "👥 Portal del Cliente":
                     st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
-                        # --- CALENDARIO BASADO EN FECHAS REALES DE PAGO ---
+                        # --- CALENDARIO CON DÍA DE GRACIA INCLUIDO ---
                         try:
                             if not fila_prestamo.empty:
                                 f_str_p = str(fila_prestamo.iloc[0]["Fecha"])
@@ -627,7 +627,7 @@ if modo_vista == "👥 Portal del Cliente":
                                         
                                     fechas_calendario.append((i, f_actual_iter))
                                     
-                                # 3. Evaluar día a día contrastando contra los pagos reales de esa fecha
+                                # 3. Evaluar día a día aplicando 1 día de gracia antes de marcar como atrasado
                                 hoy_date = datetime.now().date()
                                 detalle_calendario = []
                                 
@@ -637,8 +637,12 @@ if modo_vista == "👥 Portal del Cliente":
                                     if monto_abonado_en_fecha >= vlr_cuota - 0.05:
                                         estatus_dia = "✅ Pagado"
                                     else:
-                                        if fecha_c <= hoy_date:
+                                        # Aplicar 1 día de gracia: si hoy supera la fecha programada + 1 día, se marca atrasado
+                                        fecha_limite_gracia = fecha_c + timedelta(days=1)
+                                        if hoy_date > fecha_limite_gracia:
                                             estatus_dia = "❌ Atrasado"
+                                        elif hoy_date == fecha_limite_gracia or hoy_date == fecha_c:
+                                            estatus_dia = "⏳ Pendiente (Día de Gracia)"
                                         else:
                                             estatus_dia = "⏳ Pendiente"
                                             
@@ -651,7 +655,7 @@ if modo_vista == "👥 Portal del Cliente":
                                     
                                 df_calendario = pd.DataFrame(detalle_calendario)
                                 
-                                with st.expander("📅 Detalle de Pagos y Atrasos por Fecha Exacta", expanded=True):
+                                with st.expander("📅 Detalle de Pagos y Atrasos por Fecha (Con Día de Gracia)", expanded=True):
                                     st.dataframe(
                                         df_calendario,
                                         use_container_width=True,
@@ -659,7 +663,7 @@ if modo_vista == "👥 Portal del Cliente":
                                     )
                         except Exception as e:
                             st.error(f"Error generando calendario: {e}")
-                        # -----------------------------------------------------------------
+                        # -------------------------------------------------------------
 
                         df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
 
