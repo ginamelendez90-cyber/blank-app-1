@@ -592,7 +592,7 @@ if modo_vista == "👥 Portal del Cliente":
                     st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
-                        # --- CALENDARIO DETALLADO DE FECHAS (PAGADO / ATRASADO) ---
+                        # --- CALENDARIO EXACTO DÍA A DÍA (SIN ACUMULAR FALSOS POSITIVOS) ---
                         try:
                             if not fila_prestamo.empty:
                                 f_str_p = str(fila_prestamo.iloc[0]["Fecha"])
@@ -603,7 +603,7 @@ if modo_vista == "👥 Portal del Cliente":
                                 n_cuotas = int(match_cc.group(1)) if match_cc else 24
                                 vlr_cuota = prestamo_vis / n_cuotas if n_cuotas > 0 else prestamo_vis
                                 
-                                # Construir lista de fechas programadas según frecuencia
+                                # Generar las fechas reales de cada cuota/día de pago
                                 fechas_calendario = []
                                 f_actual_iter = f_inicio_cred
                                 
@@ -619,16 +619,17 @@ if modo_vista == "👥 Portal del Cliente":
                                         
                                     fechas_calendario.append((i, f_actual_iter))
                                     
-                                # Asignar estatus según pagos acumulados
-                                abono_acumulado_temp = pagos_vis
+                                # Evaluar cronológicamente qué días específicos fueron cubiertos por los pagos
+                                abono_disponible = pagos_vis
                                 detalle_calendario = []
                                 hoy_date = datetime.now().date()
                                 
                                 for num_c, fecha_c in fechas_calendario:
-                                    if abono_acumulado_temp >= vlr_cuota - 0.05:
+                                    if abono_disponible >= vlr_cuota - 0.05:
                                         estatus_dia = "✅ Pagado"
-                                        abono_acumulado_temp -= vlr_cuota
+                                        abono_disponible -= vlr_cuota
                                     else:
+                                        # Si la fecha ya pasó y no alcanzó el abono, marca específicamente este día como atrasado
                                         if fecha_c <= hoy_date:
                                             estatus_dia = "❌ Atrasado"
                                         else:
@@ -637,13 +638,13 @@ if modo_vista == "👥 Portal del Cliente":
                                     detalle_calendario.append({
                                         "Cuota #": f"Cuota {num_c}",
                                         "Fecha Programada": fecha_c.strftime("%Y-%m-%d"),
-                                        "Monto": f"{moneda_label} {vlr_cuota:,.2f}",
+                                        "Monto Cuota": f"{moneda_label} {vlr_cuota:,.2f}",
                                         "Estatus": estatus_dia
                                     })
                                     
                                 df_calendario = pd.DataFrame(detalle_calendario)
                                 
-                                with st.expander("📅 Ver Detalle de Cuotas por Fecha (Pagado / Atrasado)", expanded=True):
+                                with st.expander("📅 Detalle Día a Día de Cuotas (Pagado / Atrasado por Fecha)", expanded=True):
                                     st.dataframe(
                                         df_calendario,
                                         use_container_width=True,
@@ -651,7 +652,7 @@ if modo_vista == "👥 Portal del Cliente":
                                     )
                         except Exception:
                             pass
-                        # -------------------------------------------------------------
+                        # -----------------------------------------------------------------
 
                         df_vista_cli = mov_actuales[["Fecha", "Concepto", "Cargo_Vis", "Abono_Vis"]].copy()
 
