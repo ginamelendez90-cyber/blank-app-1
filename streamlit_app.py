@@ -592,25 +592,63 @@ if modo_vista == "👥 Portal del Cliente":
                     st.subheader(f"📋 Historial del Crédito Vigente ({'en Bolívares [35%]' if es_cliente_bs else 'en Dólares [20%]'})")
 
                     if not mov_actuales.empty:
-                        # --- CUADRO DE RESUMEN DE DÍAS / CUOTAS PAGADAS Y NO PAGADAS ---
+                        # --- CALENDARIO DETALLADO DE FECHAS (PAGADO / ATRASADO) ---
                         try:
-                            total_abonado_calc = mov_actuales["Abono_Vis"].sum()
-                            total_prestamo_calc = mov_actuales["Cargo_Vis"].sum()
-                            
-                            match_c_dias = re.search(r'\((\d+)\s*cuotas', str(fila_prestamo.iloc[0]["Concepto"] if not fila_prestamo.empty else ""), re.IGNORECASE)
-                            num_c_dias = int(match_c_dias.group(1)) if match_c_dias else 24
-                            vlr_cuota_calc = total_prestamo_calc / num_c_dias if num_c_dias > 0 else total_prestamo_calc
-                            
-                            dias_pagados_est = int(total_abonado_calc // vlr_cuota_calc) if vlr_cuota_calc > 0 else 0
-                            dias_pagados_est = min(dias_pagados_est, num_c_dias)
-                            dias_no_pagados_est = max(0, num_c_dias - dias_pagados_est)
-                            
-                            col_d1, col_d2, col_d3 = st.columns(3)
-                            col_d1.metric("📅 Cuotas / Días Totales", f"{num_c_dias}")
-                            col_d2.metric("✅ Cuotas Pagadas", f"{dias_pagados_est}")
-                            col_d3.metric("❌ Cuotas Pendientes", f"{dias_no_pagados_est}", delta=f"-{dias_no_pagados_est}" if dias_no_pagados_est > 0 else "Al día", delta_color="inverse")
-                            
-                            st.markdown("")
+                            if not fila_prestamo.empty:
+                                f_str_p = str(fila_prestamo.iloc[0]["Fecha"])
+                                f_inicio_cred = pd.to_datetime(f_str_p).date()
+                                concepto_cred = str(fila_prestamo.iloc[0]["Concepto"]).lower()
+                                
+                                match_cc = re.search(r'\((\d+)\s*cuotas', concepto_cred, re.IGNORECASE)
+                                n_cuotas = int(match_cc.group(1)) if match_cc else 24
+                                vlr_cuota = prestamo_vis / n_cuotas if n_cuotas > 0 else prestamo_vis
+                                
+                                # Construir lista de fechas programadas según frecuencia
+                                fechas_calendario = []
+                                f_actual_iter = f_inicio_cred
+                                
+                                for i in range(1, n_cuotas + 1):
+                                    if "semanal" in concepto_cred:
+                                        f_actual_iter += timedelta(days=7)
+                                    elif "quincenal" in concepto_cred:
+                                        f_actual_iter += timedelta(days=14)
+                                    elif "mensual" in concepto_cred:
+                                        f_actual_iter += timedelta(days=30)
+                                    else:
+                                        f_actual_iter += timedelta(days=1)
+                                        
+                                    fechas_calendario.append((i, f_actual_iter))
+                                    
+                                # Asignar estatus según pagos acumulados
+                                abono_acumulado_temp = pagos_vis
+                                detalle_calendario = []
+                                hoy_date = datetime.now().date()
+                                
+                                for num_c, fecha_c in fechas_calendario:
+                                    if abono_acumulado_temp >= vlr_cuota - 0.05:
+                                        estatus_dia = "✅ Pagado"
+                                        abono_acumulado_temp -= vlr_cuota
+                                    else:
+                                        if fecha_c <= hoy_date:
+                                            estatus_dia = "❌ Atrasado"
+                                        else:
+                                            estatus_dia = "⏳ Pendiente"
+                                            
+                                    detalle_calendario.append({
+                                        "Cuota #": f"Cuota {num_c}",
+                                        "Fecha Programada": fecha_c.strftime("%Y-%m-%d"),
+                                        "Monto": f"{moneda_label} {vlr_cuota:,.2f}",
+                                        "Estatus": estatus_dia
+                                    })
+                                    
+                                df_calendario = pd.DataFrame(detalle_calendario)
+                                
+                                with st.expander("📅 Ver Detalle de Cuotas por Fecha (Pagado / Atrasado)", expanded=True):
+                                    st.dataframe(
+                                        df_calendario,
+                                        use_container_width=True,
+                                        hide_index=True
+                                    )
                         except Exception:
                             pass
                         # -------------------------------------------------------------
